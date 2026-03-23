@@ -1,0 +1,29 @@
+# --- 编译产物 ---
+build/
+bin/
+lib/
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+
+# --- 运行时数据 ---
+var/
+*.log
+*.db
+*.sqlite
+
+# --- AI 模型文件 ---
+models/**/*.onnx
+models/**/*.gguf
+models/**/*.bin
+
+# --- IDE 配置 ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- 依赖库 ---
+# third_party/
