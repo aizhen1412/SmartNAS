@@ -1,7 +1,7 @@
 #pragma once
 #include "workflow/WFHttpServer.h"
+#include "smartnas/core/FileMetadata.h"
 
-// 使用命名空间防止代码冲突
 namespace smartnas
 {
     namespace api
@@ -10,17 +10,27 @@ namespace smartnas
         class Router
         {
         public:
-            // 核心入口：用来替换我们之前写在 main.cpp 里的 process_http_request
             static void process(WFHttpTask *server_task);
 
         private:
-            // 具体的业务处理函数：比如处理 /ping 接口
             static void handle_ping(protocol::HttpRequest *req, protocol::HttpResponse *resp);
-
-            // 【新增】处理文件上传请求
             static void handle_upload(WFHttpTask *server_task);
+            static void handle_upload_init(WFHttpTask *task);
+            static void handle_upload_chunk(WFHttpTask *task);
+            static void handle_upload_merge(WFHttpTask *task);
             static void handle_download(WFHttpTask *server_task);
+            static void handle_preview(WFHttpTask *server_task);
+
+            static std::string get_authenticated_user(protocol::HttpRequest *req);
+            static void serve_file_with_range(WFHttpTask *task, const std::string &hash, const smartnas::core::FileMetadata &meta, bool is_download);
             static void handle_not_found(protocol::HttpResponse *resp);
+            static void handle_register(WFHttpTask *task);
+            static void handle_login(WFHttpTask *task);
+            static void handle_list_files(WFHttpTask *task);
+            static void handle_delete(WFHttpTask *task);
+            static void handle_home(WFHttpTask *task);
+            static void handle_search_files(WFHttpTask *task);
+            static void handle_update_file_summary(WFHttpTask *task);
         };
 
     } // namespace api

@@ -1,0 +1,3 @@
+export winip=$(ip route | awk '/default/ {print $3; exit}')
+export all_proxy=socks5h://$winip:10808
+export ALL_PROXY=socks5h://$winip:10808

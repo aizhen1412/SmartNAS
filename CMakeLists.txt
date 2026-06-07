@@ -8,15 +8,19 @@ project(SmartNAS CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 4. 指定编译输出目录，让生成的可执行文件直接进入 /bin 目录
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+# 4. 指定编译输出目录，让生成的可执行文件留在 build 目录内
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # 5. 添加头文件搜索路径 (让你代码里的 #include "smartnas/..." 能找到)
-include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/third_party/jwt-cpp/include
+)
 
 # 6. 查找系统中安装的 pthread 和 OpenSSL (Workflow 的底层依赖)
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_library(SQLITE3_LIB sqlite3)
 
 # 7. 定义你的可执行文件，目前只包含 main.cpp
 add_executable(SmartNAS
@@ -26,6 +30,7 @@ add_executable(SmartNAS
     src/utils/HashUtil.cpp
     src/db/DatabaseManager.cpp # 【新增】
 )
+
 # 8. 链接第三方库
 # workflow: 搜狗网络引擎
 # OpenSSL::SSL / OpenSSL::Crypto: 加密库
@@ -35,4 +40,5 @@ target_link_libraries(SmartNAS PRIVATE
     OpenSSL::SSL
     OpenSSL::Crypto
     Threads::Threads
+    ${SQLITE3_LIB}
 )

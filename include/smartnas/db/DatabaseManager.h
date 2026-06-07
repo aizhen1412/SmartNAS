@@ -1,7 +1,10 @@
 #pragma once
-#include "smartnas/core/FileMetadata.h"
-#include <unordered_map>
+#include <sqlite3.h>
+#include <string>
 #include <mutex>
+#include <vector>
+#include "smartnas/core/FileMetadata.h"
+#include "smartnas/core/User.h"
 
 namespace smartnas
 {
@@ -11,23 +14,33 @@ namespace smartnas
         class DatabaseManager
         {
         public:
-            // 单例模式：保证整个程序只有一个“账本”
             static DatabaseManager &get_instance();
+            ~DatabaseManager();
 
-            // 检查哈希是否已存在 (秒传判断)
+            // 初始化：创建表结构
+            bool init(const std::string &db_path);
+
+            // --- 用户相关 ---
+            bool register_user(const std::string &username, const std::string &password);
+            bool authenticate_user(const std::string &username, const std::string &password);
+
+            // --- 文件相关 (重写之前的方法) ---
+            bool save_file_metadata(const core::FileMetadata &meta);
+            bool update_file_summary(const std::string &owner, const std::string &hash, const std::string &summary);
+            bool get_file_metadata(const std::string &hash, core::FileMetadata &out_meta);
+            bool delete_file_metadata(const std::string &hash, const std::string &username);
+            int count_file_references(const std::string &hash);
             bool exists(const std::string &hash);
-
-            // 记录一笔新账
-            void save_metadata(const smartnas::core::FileMetadata &meta);
-
-            // 根据哈希查找元数据 (下载时用)
-            bool get_metadata(const std::string &hash, smartnas::core::FileMetadata &out_meta);
+            bool user_has_file(const std::string &username, const std::string &hash);
+            // 根据用户名获取该用户的所有文件
+            std::vector<core::FileMetadata> get_user_files(const std::string &username);
+            // 根据自然语言关键词在摘要中搜索可能的文件
+            std::vector<core::FileMetadata> search_files_by_summary(const std::string &owner, const std::string &keyword);
 
         private:
-            DatabaseManager() = default;
-            // 使用哈希表模拟数据库，Key 是 SHA-256
-            std::unordered_map<std::string, smartnas::core::FileMetadata> mock_db_;
-            std::mutex mtx_; // 保证线程安全
+            DatabaseManager() : db_(nullptr) {}
+            sqlite3 *db_;
+            std::mutex mtx_;
         };
 
     } // namespace db

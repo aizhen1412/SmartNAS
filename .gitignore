@@ -18,6 +18,7 @@ var/
 models/**/*.onnx
 models/**/*.gguf
 models/**/*.bin
+models/**/*.safetensors
 
 # --- IDE 配置 ---
 .vscode/

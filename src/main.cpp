@@ -1,12 +1,18 @@
 #include <iostream>
+#include <unistd.h>
 #include "workflow/WFHttpServer.h"
-#include "smartnas/api/Router.h" // 引入我们刚刚写的路由类
+#include "smartnas/api/Router.h"
+#include "smartnas/db/DatabaseManager.h"
 
 int main()
 {
-    // 将我们自己封装的 Router::process 作为处理回调传给服务器
-    WFHttpServer server(smartnas::api::Router::process);
+    if (!smartnas::db::DatabaseManager::get_instance().init("../../var/db/smartnas.db"))
+    {
+        std::cerr << "数据库初始化失败！" << std::endl;
+        return -1;
+    }
 
+    WFHttpServer server(smartnas::api::Router::process);
     unsigned short port = 8080;
     if (server.start(port) == 0)
     {
@@ -15,7 +21,11 @@ int main()
         std::cout << "监听端口: " << port << std::endl;
         std::cout << "=====================================" << std::endl;
 
-        getchar();
+        // Block forever instead of getchar() which causes SIGTTIN in background
+        while (true)
+        {
+            pause();
+        }
         server.stop();
     }
     else

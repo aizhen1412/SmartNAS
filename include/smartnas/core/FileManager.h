@@ -16,6 +16,16 @@ namespace smartnas
             // 参数 size: 数据的大小 (字节)
             static bool save_file(const std::string &filename, const void *data, size_t size);
             static bool load_file(const std::string &filename, std::string &out_data);
+            static bool delete_file(const std::string &filename);
+
+            // 分片上传相关
+            static bool save_chunk(const std::string &hash, int chunk_index, const void *data, size_t size);
+            static bool chunk_exists(const std::string &hash, int chunk_index);
+            static bool merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename);
+
+            // 零拷贝 / 范围读取支持
+            static bool pread_file(const std::string &filename, size_t offset, size_t length, std::string &out_data);
+            static size_t get_file_size(const std::string &filename);
         };
 
     } // namespace core

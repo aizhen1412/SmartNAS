@@ -7,13 +7,16 @@ namespace smartnas
     namespace core
     {
 
+        // include/smartnas/core/FileMetadata.h
         struct FileMetadata
         {
-            std::string filename;     // 原始文件名
-            std::string file_hash;    // SHA-256 指纹
-            size_t file_size;         // 文件大小
-            std::string storage_path; // 在服务器上的实际物理路径
-            long long upload_time;    // 上传时间戳
+            std::string filename;
+            std::string file_hash;
+            size_t file_size;
+            std::string storage_path;
+            long long upload_time;
+            std::string owner;   // 【新增】
+            std::string summary; // 文件摘要，由外部服务通过 Core API 写入
         };
 
     } // namespace core

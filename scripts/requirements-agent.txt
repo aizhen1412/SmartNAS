@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+requests
+langchain
+langchain-community
+langchain-core
+pydantic
+torch
+transformers
+accelerate
