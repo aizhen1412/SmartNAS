@@ -17,6 +17,24 @@ namespace smartnas
             long long upload_time;
             std::string owner;   // 【新增】
             std::string summary; // 文件摘要，由外部服务通过 Core API 写入
+            std::string directory = "/";
+            int deleted = 0;
+            long long deleted_time = 0;
+        };
+
+        struct FolderMetadata
+        {
+            std::string path;
+            long long created_time;
+        };
+
+        struct ShareMetadata
+        {
+            std::string token;
+            std::string file_hash;
+            std::string owner;
+            long long expires_at;
+            std::string filename;
         };
 
     } // namespace core

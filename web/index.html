@@ -6,24 +6,174 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SmartNAS | 你的私有智能云</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 SparkMD5 用于前端计算文件 Hash -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/spark-md5/3.0.2/spark-md5.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        :root {
+            color-scheme: light;
+        }
+
         body {
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            background: #f6f7fb;
+            color: #1f2937;
             min-height: 100vh;
         }
 
         .glass-card {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(10px);
-            border-radius: 1rem;
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            box-shadow: none;
+        }
+
+        .app-shell {
+            background: transparent;
+            border: 0;
+            border-radius: 8px;
+            box-shadow: none;
+        }
+
+        .primary-btn,
+        .ghost-btn,
+        .icon-btn {
+            border-radius: 8px;
+            transition: all 0.18s ease;
+        }
+
+        .primary-btn {
+            background: #1f2937;
+            color: white;
+        }
+
+        .primary-btn:hover {
+            background: #111827;
+        }
+
+        .ghost-btn {
+            background: white;
+            border: 1px solid #dbe3ee;
+            color: #334155;
+        }
+
+        .ghost-btn:hover {
+            border-color: #9fb0c7;
+            background: #f8fafc;
+        }
+
+        .icon-btn {
+            width: 30px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid transparent;
+        }
+
+        .icon-btn:hover {
+            background: #f1f5f9;
+            border-color: #dbe3ee;
         }
 
         .file-item:hover {
-            background: rgba(59, 130, 246, 0.05);
+            background: #fafafa;
+        }
+
+        .summary-text {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .summary-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .compact-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .segmented {
+            display: inline-flex;
+            border: 1px solid #dbe3ee;
+            border-radius: 8px;
+            background: white;
+            overflow: hidden;
+        }
+
+        .segmented button {
+            padding: 8px 12px;
+            font-size: 13px;
+            color: #64748b;
+        }
+
+        .segmented button.active {
+            background: #1f2937;
+            color: white;
+        }
+
+        .action-menu {
+            position: fixed;
+            z-index: 80;
+            min-width: 180px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+            padding: 6px;
+            display: none;
+        }
+
+        .action-menu.active {
+            display: block;
+        }
+
+        .action-menu button {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            color: #334155;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .action-menu button:hover {
+            background: #f8fafc;
+        }
+
+        .action-menu button.danger {
+            color: #dc2626;
+        }
+
+        .summary-ready {
+            background: #ecfdf5;
+            color: #047857;
+        }
+
+        .summary-empty {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .summary-running {
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .summary-failed {
+            background: #fef2f2;
+            color: #dc2626;
         }
 
         /* 模态框样式 */
@@ -47,7 +197,7 @@
 
         .modal-content {
             background: white;
-            border-radius: 1rem;
+            border-radius: 8px;
             padding: 2rem;
             width: 100%;
             max-width: 400px;
@@ -64,15 +214,18 @@
     </style>
 </head>
 
-<body class="p-4 md:p-8">
-    <div class="max-w-6xl mx-auto">
+<body class="p-3 md:p-5">
+    <div class="max-w-7xl mx-auto app-shell">
         <!-- 顶部导航 -->
-        <header class="flex justify-between items-center mb-8">
+        <header class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-4">
             <div class="flex items-center space-x-3">
-                <div class="bg-blue-600 p-2 rounded-lg text-white">
-                    <i class="fas fa-server text-2xl"></i>
+                <div class="bg-gray-900 p-2 rounded-lg text-white">
+                    <i class="fas fa-server text-xl"></i>
                 </div>
-                <h1 class="text-2xl font-bold text-gray-800">SmartNAS</h1>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">SmartNAS</h1>
+                    <p class="text-xs text-gray-500">私有网盘与智能索引</p>
+                </div>
             </div>
             <!-- 动态显示区域 -->
             <div id="user-info" class="flex items-center space-x-4">
@@ -140,7 +293,7 @@
                 </div>
                 <h3 class="text-lg leading-6 font-medium text-gray-900 mb-2">删除文件</h3>
                 <div class="mt-2 mb-6">
-                    <p class="text-sm text-gray-500">你确定要删除这个文件吗？此操作无法撤销。</p>
+                    <p class="text-sm text-gray-500">文件会移入回收站，之后可以恢复或永久删除。</p>
                 </div>
                 <div class="flex justify-center space-x-4">
                     <button onclick="closeModal('deleteModal')"
@@ -156,24 +309,29 @@
             class="fixed bottom-4 right-4 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg transform transition-transform translate-y-20 opacity-0 z-50">
             <span id="toastMsg">提示内容</span>
         </div>
+        <div id="actionMenu" class="action-menu"></div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <aside class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <aside class="lg:col-span-4 xl:col-span-3 space-y-6">
                 <!-- 智能对话小窗 -->
-                <div class="glass-card p-6 shadow-sm">
-                    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4"><i
-                            class="fas fa-robot text-blue-500 mr-2"></i> Qwen 智能助手</h2>
+                <div class="glass-card p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-sm font-semibold text-gray-700"><i
+                                class="fas fa-robot text-blue-500 mr-2"></i>Qwen 助手</h2>
+                        <button onclick="clearChatHistory()" class="icon-btn text-gray-400 hover:text-gray-700" title="清空对话">
+                            <i class="fas fa-rotate-left"></i>
+                        </button>
+                    </div>
                     <div id="chatHistory"
-                        class="space-y-3 mb-4 h-64 overflow-y-auto text-sm text-gray-700 bg-white/50 p-3 rounded-xl border border-gray-100">
+                        class="space-y-3 mb-3 h-64 overflow-y-auto text-sm text-gray-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
                         <div class="flex items-start mb-2">
                             <i class="fas fa-robot text-blue-500 mt-1 mr-2"></i>
-                            <span class="bg-blue-50 px-3 py-2 rounded-lg rounded-tl-none inline-block">我是 SmartNAS
-                                的内置小助手 (基于千问 7B)，今天需要什么帮手？</span>
+                            <span class="bg-white px-3 py-2 rounded-lg rounded-tl-none inline-block border border-slate-100">我可以帮你搜索文件摘要，也能回答网盘里的资料问题。</span>
                         </div>
                     </div>
                     <div class="relative flex">
                         <input type="text" id="chatInput" placeholder="输入问题..." onkeypress="handleChatKeyPress(event)"
-                            class="w-full pl-3 pr-10 py-2 rounded-xl bg-white border-2 border-transparent focus:border-blue-300 focus:outline-none focus:ring-0 text-sm">
+                            class="w-full pl-3 pr-10 py-2 rounded-lg bg-white border border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-0 text-sm">
                         <button id="chatSendBtn" onclick="sendChatMessage()"
                             class="absolute right-2 top-2 text-blue-500 hover:text-blue-700">
                             <i class="fas fa-paper-plane"></i>
@@ -181,23 +339,54 @@
                     </div>
                 </div>
 
-                <div class="glass-card p-6 shadow-sm">
-                    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">智能搜索</h2>
+                <div class="glass-card p-4">
+                    <h2 class="text-sm font-semibold text-gray-700 mb-4">智能搜索</h2>
                     <div class="relative">
-                        <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="试试搜索 '发票'..."
-                            class="w-full pl-10 pr-4 py-2 rounded-xl bg-white border-none focus:ring-2 focus:ring-blue-400">
-                        <i class="fas fa-magic absolute left-3 top-3 text-blue-400"></i>
+                        <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="搜索文件名或摘要"
+                            class="w-full pl-10 pr-4 py-2 rounded-lg bg-white border border-slate-200 focus:ring-2 focus:ring-blue-200 focus:border-blue-400">
+                        <i class="fas fa-magnifying-glass absolute left-3 top-3 text-blue-400"></i>
+                    </div>
+                </div>
+
+                <div class="glass-card p-4">
+                    <h2 class="text-sm font-semibold text-gray-700 mb-4">索引状态</h2>
+                    <div class="grid grid-cols-3 gap-3 text-center">
+                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                            <div id="statFiles" class="text-xl font-bold text-gray-900">0</div>
+                            <div class="text-xs text-gray-500 mt-1">文件</div>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                            <div id="statSummaries" class="text-xl font-bold text-emerald-600">0</div>
+                            <div class="text-xs text-gray-500 mt-1">已摘要</div>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
+                            <div id="statTasks" class="text-xl font-bold text-blue-600">0</div>
+                            <div class="text-xs text-gray-500 mt-1">任务中</div>
+                        </div>
                     </div>
                 </div>
             </aside>
 
-            <main class="lg:col-span-3">
-                <div class="glass-card shadow-sm overflow-hidden">
-                    <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-white/50">
-                        <h3 class="text-lg font-bold text-gray-800">全部文件</h3>
-                        <div class="flex items-center space-x-4">
+            <main class="lg:col-span-8 xl:col-span-9">
+                <div class="glass-card overflow-hidden">
+                    <div class="p-4 border-b border-slate-100 flex flex-col md:flex-row md:justify-between md:items-center gap-3 bg-white">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">全部文件</h3>
+                            <p class="text-sm text-gray-500 mt-1">上传后会自动为支持的文档生成可搜索摘要</p>
+                        </div>
+                        <div class="compact-toolbar">
+                            <div class="segmented">
+                                <button id="filesViewBtn" onclick="setTrashView(false)" class="active">文件</button>
+                                <button id="trashViewBtn" onclick="setTrashView(true)">回收站</button>
+                            </div>
+                            <button onclick="createFolder()" class="ghost-btn px-3 py-2 text-sm" title="新建文件夹">
+                                <i class="fas fa-folder-plus"></i>
+                            </button>
+                            <button onclick="summarizeMissing()" class="ghost-btn px-3 py-2 text-sm" title="补全摘要">
+                                <i class="fas fa-list-check"></i>
+                            </button>
                             <label
-                                class="cursor-pointer bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center space-x-2 shadow-sm">
+                                class="primary-btn cursor-pointer px-4 py-2 flex items-center space-x-2 text-sm">
                                 <i class="fas fa-cloud-upload-alt"></i>
                                 <span class="font-medium">上传文件</span>
                                 <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this)">
@@ -205,13 +394,15 @@
                         </div>
                     </div>
 
+                    <div id="breadcrumb" class="px-5 py-3 border-b border-slate-100 text-sm text-gray-500 bg-white"></div>
+
                     <div
-                        class="grid grid-cols-12 gap-4 px-6 py-3 bg-gray-50/80 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 select-none">
-                        <div class="col-span-5 flex items-center cursor-pointer hover:text-blue-600 transition"
+                        class="hidden md:grid grid-cols-12 gap-4 px-5 py-3 bg-slate-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-slate-100 select-none">
+                        <div class="col-span-6 flex items-center cursor-pointer hover:text-blue-600 transition"
                             onclick="toggleSort('name')">
                             名称 <i id="sortIcon_name" class="fas fa-sort ml-2 text-gray-300"></i>
                         </div>
-                        <div class="col-span-3 flex items-center cursor-pointer hover:text-blue-600 transition"
+                        <div class="col-span-2 flex items-center cursor-pointer hover:text-blue-600 transition"
                             onclick="toggleSort('time')">
                             上传时间 <i id="sortIcon_time" class="fas fa-sort ml-2 text-gray-300"></i>
                         </div>
@@ -219,7 +410,7 @@
                             onclick="toggleSort('size')">
                             大小 <i id="sortIcon_size" class="fas fa-sort ml-2 text-gray-300"></i>
                         </div>
-                        <div class="col-span-2">操作</div>
+                        <div class="col-span-2 text-right">操作</div>
                     </div>
 
                     <!-- 文件列表动态容器 -->
@@ -261,6 +452,11 @@
 
         // --- 核心逻辑：UI 更新 ---
         let globalFiles = [];
+        let globalFolders = [];
+        let currentDir = "/";
+        let showingTrash = false;
+        let summaryTasksByHash = {};
+        let summaryPollTimer = null;
 
         function checkAuth() {
             const user = localStorage.getItem('username');
@@ -323,15 +519,18 @@
             if (!token) return;
 
             try {
-                const response = await fetch(`${API_BASE}/api/list`, {
+                const response = await fetch(listUrl(), {
                     method: 'GET',
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
 
                 if (!response.ok) throw new Error("服务器拒绝访问");
 
-                const files = await response.json();
-                globalFiles = files;
+                const payload = await response.json();
+                globalFiles = Array.isArray(payload) ? payload : (payload.files || []);
+                globalFolders = Array.isArray(payload) ? [] : (payload.folders || []);
+                updateStats();
+                renderBreadcrumb();
                 applyFilterAndSort();
             } catch (e) {
                 console.error("获取失败:", e);
@@ -371,7 +570,10 @@
         function applyFilterAndSort() {
             const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
 
-            let filtered = globalFiles.filter(f => f.name.toLowerCase().includes(query));
+            let filtered = globalFiles.filter(f => {
+                const summary = (f.summary || '').toLowerCase();
+                return f.name.toLowerCase().includes(query) || summary.includes(query);
+            });
 
             filtered.sort((a, b) => {
                 let cmp = 0;
@@ -388,6 +590,63 @@
             renderFiles(filtered);
         }
 
+        function updateStats() {
+            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running'].includes(t.status)).length;
+            const summarized = globalFiles.filter(f => (f.summary || '').trim()).length;
+            const statFiles = document.getElementById('statFiles');
+            const statSummaries = document.getElementById('statSummaries');
+            const statTasks = document.getElementById('statTasks');
+            if (statFiles) statFiles.innerText = globalFiles.length;
+            if (statSummaries) statSummaries.innerText = summarized;
+            if (statTasks) statTasks.innerText = activeTasks;
+        }
+
+        function listUrl() {
+            const params = new URLSearchParams();
+            params.set('dir', currentDir);
+            if (showingTrash) params.set('deleted', '1');
+            return `${API_BASE}/api/list?${params.toString()}`;
+        }
+
+        function renderBreadcrumb() {
+            const el = document.getElementById('breadcrumb');
+            const filesViewBtn = document.getElementById('filesViewBtn');
+            const trashViewBtn = document.getElementById('trashViewBtn');
+            if (!el) return;
+            if (filesViewBtn) filesViewBtn.classList.toggle('active', !showingTrash);
+            if (trashViewBtn) trashViewBtn.classList.toggle('active', showingTrash);
+
+            if (showingTrash) {
+                el.innerHTML = '<span class="font-semibold text-red-500"><i class="fas fa-trash-can mr-2"></i>回收站</span>';
+                return;
+            }
+
+            const parts = currentDir === '/' ? [] : currentDir.split('/').filter(Boolean);
+            let path = '';
+            const crumbs = [`<button onclick="openDirectory('/')" class="hover:text-blue-600 font-semibold">根目录</button>`];
+            parts.forEach(part => {
+                path += '/' + part;
+                crumbs.push(`<button onclick="openDirectory('${escapeHtml(path)}')" class="hover:text-blue-600">${escapeHtml(part)}</button>`);
+            });
+            el.innerHTML = crumbs.join('<span class="mx-2 text-gray-300">/</span>');
+        }
+
+        function openDirectory(path) {
+            currentDir = path || '/';
+            showingTrash = false;
+            fetchFileList();
+        }
+
+        function toggleTrash() {
+            showingTrash = !showingTrash;
+            fetchFileList();
+        }
+
+        function setTrashView(value) {
+            showingTrash = value;
+            fetchFileList();
+        }
+
         // 格式化时间戳显示
         function formatUploadTime(timestamp) {
             if (!timestamp) return '-';
@@ -401,26 +660,154 @@
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
         }
 
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getFileIcon(name) {
+            const ext = (name.split('.').pop() || '').toLowerCase();
+            if (['pdf'].includes(ext)) return 'fa-file-pdf text-red-500';
+            if (['docx', 'doc'].includes(ext)) return 'fa-file-word text-blue-600';
+            if (['xlsx', 'xls', 'csv'].includes(ext)) return 'fa-file-excel text-emerald-600';
+            if (['pptx', 'ppt'].includes(ext)) return 'fa-file-powerpoint text-orange-500';
+            if (['html', 'htm', 'json', 'txt', 'md', 'xml', 'svg', 'ipynb'].includes(ext)) return 'fa-file-lines text-slate-500';
+            if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif'].includes(ext)) return 'fa-file-image text-cyan-600';
+            if (['mp4'].includes(ext)) return 'fa-file-video text-violet-600';
+            if (['mp3', 'wav', 'm4a'].includes(ext)) return 'fa-file-audio text-fuchsia-600';
+            if (['zip', 'epub'].includes(ext)) return 'fa-file-zipper text-amber-600';
+            return 'fa-file text-slate-500';
+        }
+
+        function isSummarizableFile(name) {
+            const ext = (name.split('.').pop() || '').toLowerCase();
+            return [
+                'pdf', 'docx', 'pptx', 'xlsx', 'txt', 'csv', 'json', 'html', 'htm',
+                'md', 'xml', 'epub', 'zip', 'ipynb',
+                'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'svg',
+                'wav', 'mp3', 'm4a', 'mp4'
+            ].includes(ext);
+        }
+
+        function getSummaryBadge(file) {
+            const task = summaryTasksByHash[file.hash];
+            if (task && ['pending', 'running'].includes(task.status)) {
+                return '<span class="summary-pill summary-running"><i class="fas fa-spinner fa-spin"></i>摘要中</span>';
+            }
+            if (task && task.status === 'failed') {
+                return '<span class="summary-pill summary-failed"><i class="fas fa-circle-exclamation"></i>失败</span>';
+            }
+            if ((file.summary || '').trim()) {
+                return '<span class="summary-pill summary-ready"><i class="fas fa-check"></i>已索引</span>';
+            }
+            return '<span class="summary-pill summary-empty"><i class="fas fa-minus"></i>未摘要</span>';
+        }
+
+        function closeActionMenu() {
+            const menu = document.getElementById('actionMenu');
+            if (menu) menu.classList.remove('active');
+        }
+
+        function openFileMenu(hash, encodedName, canSummarize, event) {
+            event.stopPropagation();
+            const menu = document.getElementById('actionMenu');
+            const name = decodeURIComponent(encodedName || '');
+            const disabledClass = canSummarize ? '' : 'opacity:0.45;pointer-events:none;';
+
+            if (showingTrash) {
+                menu.innerHTML = `
+                    <button onclick="restoreByHash('${hash}'); closeActionMenu();"><i class="fas fa-rotate-left"></i>恢复</button>
+                    <button class="danger" onclick="purgeByHash('${hash}'); closeActionMenu();"><i class="fas fa-fire"></i>永久删除</button>
+                `;
+            } else {
+                menu.innerHTML = `
+                    <button onclick="summarizeByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-wand-magic-sparkles"></i>生成摘要</button>
+                    <button onclick="askFileByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-circle-question"></i>问这个文件</button>
+                    <button onclick="showMarkdownByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-file-code"></i>提取文本</button>
+                    <button onclick="renameByHash('${hash}', '${encodeURIComponent(name)}'); closeActionMenu();"><i class="fas fa-pen"></i>重命名</button>
+                    <button onclick="moveByHash('${hash}'); closeActionMenu();"><i class="fas fa-folder-tree"></i>移动</button>
+                    <button onclick="shareByHash('${hash}'); closeActionMenu();"><i class="fas fa-link"></i>分享</button>
+                    <button class="danger" onclick="confirmDelete('${hash}'); closeActionMenu();"><i class="fas fa-trash"></i>移入回收站</button>
+                `;
+            }
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            menu.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - 260))}px`;
+            menu.style.left = `${Math.max(8, Math.min(rect.left - 145, window.innerWidth - 200))}px`;
+            menu.classList.add('active');
+        }
+
+        document.addEventListener('click', closeActionMenu);
+        window.addEventListener('resize', closeActionMenu);
+
         function renderFiles(files) {
             const listDiv = document.getElementById('file-list');
-            if (files.length === 0) {
+            if (files.length === 0 && globalFolders.length === 0) {
                 listDiv.innerHTML = '<div class="p-8 text-center text-gray-400">暂无文件</div>';
                 return;
             }
 
-            listDiv.innerHTML = files.map(file => `
-                <div class="grid grid-cols-12 gap-4 px-6 py-4 items-center file-item transition">
-                    <div class="col-span-5 flex items-center space-x-3 overflow-hidden">
-                        <i class="far fa-file-alt text-blue-400 text-xl flex-shrink-0"></i>
-                        <span class="text-sm font-medium text-gray-700 truncate" title="${file.name}">${file.name}</span>
+            const folderHtml = showingTrash ? '' : globalFolders.map(folder => {
+                const safeName = escapeHtml(folder.name);
+                const safePath = escapeHtml(folder.path);
+                return `
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition bg-amber-50/40">
+                    <div class="md:col-span-6 flex items-center space-x-3 overflow-hidden">
+                        <div class="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-folder text-amber-500 text-lg"></i>
+                        </div>
+                        <button onclick="openDirectory('${safePath}')" class="text-sm font-semibold text-gray-800 truncate hover:text-blue-600 text-left">${safeName}</button>
                     </div>
-                    <div class="col-span-3 text-sm text-gray-500">${formatUploadTime(file.uploadTime)}</div>
-                    <div class="col-span-2 text-sm text-gray-500">${file.size}</div>
-                    <div class="col-span-2 flex space-x-4 flex-shrink-0">                        <button onclick="previewByHash('${file.hash}')" class="text-green-500 hover:text-green-700 transition-colors" title="预览"><i class="fas fa-eye"></i></button>                        <button onclick="downloadByHash('${file.hash}')" class="text-blue-500 hover:text-blue-700 transition-colors" title="下载"><i class="fas fa-download"></i></button>
-                        <button onclick="confirmDelete('${file.hash}')" class="text-red-400 hover:text-red-600 transition-colors" title="删除"><i class="fas fa-trash"></i></button>
+                    <div class="md:col-span-2 text-sm text-gray-400">文件夹</div>
+                    <div class="md:col-span-2 text-sm text-gray-400">-</div>
+                    <div class="md:col-span-2 text-right text-xs text-gray-400">点击打开</div>
+                </div>`;
+            }).join('');
+
+            const fileHtml = files.map(file => {
+                const safeName = escapeHtml(file.name);
+                const safeHash = escapeHtml(file.hash);
+                const encodedName = encodeURIComponent(file.name || '');
+                const summary = (file.summary || '').trim();
+                const safeSummary = escapeHtml(summary);
+                const fileIcon = getFileIcon(file.name);
+                const task = summaryTasksByHash[file.hash];
+                const taskText = task && task.status === 'failed' ? escapeHtml(task.message || '摘要失败') : '';
+                const canSummarize = isSummarizableFile(file.name) && !showingTrash;
+                return `
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition">
+                    <div class="md:col-span-6 flex items-start space-x-3 overflow-hidden">
+                        <div class="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                            <i class="far ${fileIcon} text-lg"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <div class="text-sm font-semibold text-gray-800 truncate" title="${safeName}">${safeName}</div>
+                                ${getSummaryBadge(file)}
+                            </div>
+                            <div class="mt-1 text-xs text-gray-500 summary-text">${taskText || (summary ? safeSummary : (canSummarize ? '等待生成摘要' : '暂不参与摘要'))}</div>
+                        </div>
+                    </div>
+                    <div class="md:col-span-2 text-sm text-gray-500">${formatUploadTime(file.uploadTime)}</div>
+                    <div class="md:col-span-2 text-sm text-gray-500">${file.size}</div>
+                    <div class="md:col-span-2 flex md:justify-end space-x-1 flex-shrink-0">
+                        ${showingTrash ? `
+                            <button onclick="restoreByHash('${safeHash}')" class="icon-btn text-emerald-600" title="恢复"><i class="fas fa-rotate-left"></i></button>
+                            <button onclick="openFileMenu('${safeHash}', '${encodedName}', ${canSummarize}, event)" class="icon-btn text-slate-600" title="更多"><i class="fas fa-ellipsis"></i></button>
+                        ` : `
+                            <button onclick="previewByHash('${safeHash}')" class="icon-btn text-emerald-600" title="预览"><i class="fas fa-eye"></i></button>
+                            <button onclick="downloadByHash('${safeHash}')" class="icon-btn text-blue-600" title="下载"><i class="fas fa-download"></i></button>
+                            <button onclick="openFileMenu('${safeHash}', '${encodedName}', ${canSummarize}, event)" class="icon-btn text-slate-600" title="更多"><i class="fas fa-ellipsis"></i></button>
+                        `}
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
+            listDiv.innerHTML = folderHtml + fileHtml;
         }
 
         // --- 之前实现的业务逻辑 ---
@@ -494,7 +881,9 @@
 
             try {
                 // 1. 初始化上传：检查是否秒传，或需要哪些分片
-                const initRes = await fetch(`${API_BASE}/api/upload/init?hash=${fileHash}&total=${totalChunks}`);
+                const initRes = await fetch(`${API_BASE}/api/upload/init?hash=${fileHash}&total=${totalChunks}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
                 const initData = await initRes.json();
 
                 if (initData.status === "exists") { // 秒传逻辑由合并接口处理或在此截断
@@ -503,11 +892,13 @@
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`, 'File-Name': originalName,
-                            'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size
+                            'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size,
+                            'Directory': encodeURIComponent(currentDir)
                         }
                     });
                     showToast("上传结果: Hit! Seconds-Transfer success.");
                     fetchFileList();
+                    if (isSummarizableFile(file.name)) startSummarizeByHash(fileHash, { silent: true });
                     input.value = '';
                     return;
                 }
@@ -526,7 +917,8 @@
                         method: 'POST',
                         headers: {
                             'File-Hash': fileHash,
-                            'Chunk-Index': chunkIndex
+                            'Chunk-Index': chunkIndex,
+                            'Authorization': `Bearer ${token}`
                         },
                         body: chunk
                     });
@@ -539,12 +931,14 @@
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${token}`, 'File-Name': originalName,
-                        'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size
+                        'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size,
+                        'Directory': encodeURIComponent(currentDir)
                     }
                 });
                 const mergeData = await mergeRes.json();
                 showToast("上传结果: " + mergeData.message);
                 fetchFileList();
+                if (isSummarizableFile(file.name)) startSummarizeByHash(fileHash, { silent: true });
             } catch (e) {
                 console.error(e);
                 showToast("上传过程出错", true);
@@ -553,35 +947,10 @@
             }
         }
 
-        // 辅助函数：计算大文件 Hash
-        function calculateFileHash(file) {
-            return new Promise((resolve, reject) => {
-                const chunkSize = 2097152;
-                const chunks = Math.ceil(file.size / chunkSize);
-                let currentChunk = 0;
-                const spark = new SparkMD5.ArrayBuffer();
-                const fileReader = new FileReader();
-
-                fileReader.onload = function (e) {
-                    spark.append(e.target.result);
-                    currentChunk++;
-                    if (currentChunk < chunks) {
-                        loadNext();
-                    } else {
-                        resolve(spark.end());
-                    }
-                };
-                fileReader.onerror = function () {
-                    reject("文件读取错误");
-                };
-
-                function loadNext() {
-                    const start = currentChunk * chunkSize;
-                    const end = ((start + chunkSize) >= file.size) ? file.size : start + chunkSize;
-                    fileReader.readAsArrayBuffer(file.slice(start, end));
-                }
-                loadNext();
-            });
+        async function calculateFileHash(file) {
+            const buffer = await file.arrayBuffer();
+            const digest = await crypto.subtle.digest('SHA-256', buffer);
+            return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         function downloadByHash(hash) {
@@ -594,6 +963,111 @@
             const token = getAuthToken();
             if (!token) { showToast("请先登录", true); return; }
             window.open(`${API_BASE}/api/preview?hash=${hash}&token=${token}`, "_blank");
+        }
+
+        async function summarizeByHash(hash) {
+            await startSummarizeByHash(hash, { force: true });
+        }
+
+        async function startSummarizeByHash(hash, options = {}) {
+            const token = getAuthToken();
+            const force = Boolean(options.force);
+            const silent = Boolean(options.silent);
+            if (!token) { if (!silent) showToast("请先登录", true); return; }
+
+            if (!silent) showToast("摘要任务已加入队列");
+            try {
+                const response = await fetch(`${AGENT_BASE}/api/agent/summarize/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ hash, force })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || `AI 服务返回 ${response.status}`);
+                }
+
+                summaryTasksByHash[hash] = data;
+                updateStats();
+                applyFilterAndSort();
+                ensureSummaryPolling();
+            } catch (e) {
+                console.error("摘要生成失败:", e);
+                if (!silent) showToast(`摘要生成失败: ${e.message}`, true);
+            }
+        }
+
+        async function summarizeMissing() {
+            const token = getAuthToken();
+            if (!token) { showToast("请先登录", true); return; }
+
+            showToast("正在排队未摘要文件...");
+            try {
+                const response = await fetch(`${AGENT_BASE}/api/agent/summarize/missing`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || `AI 服务返回 ${response.status}`);
+                }
+                (data.tasks || []).forEach(task => {
+                    summaryTasksByHash[task.hash] = task;
+                });
+                showToast(`已排队 ${data.queued} 个摘要任务`);
+                updateStats();
+                applyFilterAndSort();
+                ensureSummaryPolling();
+            } catch (e) {
+                console.error("批量摘要失败:", e);
+                showToast(`批量摘要失败: ${e.message}`, true);
+            }
+        }
+
+        function ensureSummaryPolling() {
+            if (summaryPollTimer) return;
+            summaryPollTimer = setInterval(pollSummaryTasks, 1800);
+            pollSummaryTasks();
+        }
+
+        async function pollSummaryTasks() {
+            const token = getAuthToken();
+            if (!token) return;
+
+            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running'].includes(t.status));
+            if (activeTasks.length === 0) {
+                clearInterval(summaryPollTimer);
+                summaryPollTimer = null;
+                updateStats();
+                return;
+            }
+
+            let shouldRefresh = false;
+            await Promise.all(activeTasks.map(async task => {
+                try {
+                    const response = await fetch(`${AGENT_BASE}/api/agent/summarize/status/${task.id}`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        summaryTasksByHash[data.hash] = data;
+                        if (['success', 'failed'].includes(data.status)) {
+                            shouldRefresh = true;
+                            if (data.status === 'success') showToast("摘要已生成");
+                            if (data.status === 'failed') showToast(`摘要失败: ${data.message}`, true);
+                        }
+                    }
+                } catch (e) {
+                    console.error("摘要状态轮询失败:", e);
+                }
+            }));
+
+            if (shouldRefresh) fetchFileList();
+            updateStats();
+            applyFilterAndSort();
         }
 
         let fileToDelete = null;
@@ -634,15 +1108,142 @@
             }
         }
 
+        async function restoreByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            const res = await fetch(`${API_BASE}/api/restore?hash=${encodeURIComponent(hash)}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            showToast(res.ok ? "已恢复" : "恢复失败", !res.ok);
+            fetchFileList();
+        }
+
+        async function purgeByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            if (!confirm("永久删除后无法恢复，确认继续？")) return;
+            const res = await fetch(`${API_BASE}/api/purge?hash=${encodeURIComponent(hash)}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            showToast(res.ok ? "已永久删除" : "永久删除失败", !res.ok);
+            fetchFileList();
+        }
+
+        async function renameByHash(hash, oldName) {
+            const token = getAuthToken();
+            if (!token) return;
+            const decodedOldName = decodeURIComponent(oldName || '').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+            const name = prompt("输入新的文件名", decodedOldName);
+            if (!name) return;
+            const res = await fetch(`${API_BASE}/api/rename?hash=${encodeURIComponent(hash)}&name=${encodeURIComponent(name)}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            showToast(res.ok ? "重命名成功" : "重命名失败", !res.ok);
+            fetchFileList();
+        }
+
+        async function moveByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            const dir = prompt("移动到目录，例如 /合同/2026", currentDir);
+            if (!dir) return;
+            const res = await fetch(`${API_BASE}/api/move?hash=${encodeURIComponent(hash)}&dir=${encodeURIComponent(dir)}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            showToast(res.ok ? "移动成功" : "移动失败", !res.ok);
+            fetchFileList();
+        }
+
+        async function shareByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            const res = await fetch(`${API_BASE}/api/share/create?hash=${encodeURIComponent(hash)}&hours=24`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showToast("分享失败", true);
+                return;
+            }
+            const url = `${window.location.origin}${data.url}`;
+            try {
+                await navigator.clipboard.writeText(url);
+                showToast("分享链接已复制，有效期 24 小时");
+            } catch {
+                showToast(url);
+            }
+        }
+
+        async function createFolder() {
+            const token = getAuthToken();
+            if (!token) return;
+            const name = prompt("文件夹名称");
+            if (!name) return;
+            const path = currentDir === "/" ? `/${name}` : `${currentDir}/${name}`;
+            const res = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(path)}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            showToast(res.ok ? "文件夹已创建" : "创建文件夹失败", !res.ok);
+            fetchFileList();
+        }
+
+        async function showMarkdownByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            showToast("正在读取提取文本...");
+            try {
+                const res = await fetch(`${AGENT_BASE}/api/agent/markdown/${encodeURIComponent(hash)}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || '读取失败');
+                const win = window.open('', '_blank');
+                win.document.write(`<pre style="white-space:pre-wrap;font:14px/1.6 ui-monospace,monospace;padding:24px;color:#1f2937">${escapeHtml(data.markdown)}</pre>`);
+            } catch (e) {
+                showToast(`读取提取文本失败: ${e.message}`, true);
+            }
+        }
+
+        async function askFileByHash(hash) {
+            const token = getAuthToken();
+            if (!token) return;
+            const question = prompt("想问这个文件什么？");
+            if (!question) return;
+            showToast("正在基于文件内容回答...");
+            try {
+                const res = await fetch(`${AGENT_BASE}/api/agent/file_qa`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ hash, question })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || '问答失败');
+                const history = document.getElementById('chatHistory');
+                history.innerHTML += `<div class="flex items-start justify-end mb-2"><span class="bg-gray-100 px-3 py-2 rounded-lg rounded-tr-none inline-block text-right text-gray-800">${escapeHtml(question)}</span><i class="fas fa-user text-gray-400 mt-1 ml-2"></i></div>`;
+                history.innerHTML += `<div class="flex items-start mb-2"><i class="fas fa-robot text-blue-500 mt-1 mr-2"></i><span class="bg-white px-3 py-2 rounded-lg rounded-tl-none inline-block border border-slate-100">${escapeHtml(data.answer).replace(/\n/g, '<br>')}</span></div>`;
+                history.scrollTop = history.scrollHeight;
+                showToast("文件问答完成");
+            } catch (e) {
+                showToast(`文件问答失败: ${e.message}`, true);
+            }
+        }
+
         // 页面加载时初始化 UI
         window.onload = () => {
             checkAuth();
             updateSortIcons();
         };
     </script>
-</body>
 
-</html>
 <!-- Chat JS Logic -->
 <script>
     async function sendChatMessage() {
@@ -721,6 +1322,25 @@
 
     function handleChatKeyPress(e) {
         if (e.key === 'Enter') sendChatMessage();
+    }
+
+    async function clearChatHistory() {
+        const token = getAuthToken();
+        if (!token) return;
+        try {
+            await fetch(`${AGENT_BASE}/api/agent/clear_history`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            document.getElementById('chatHistory').innerHTML = `
+                <div class="flex items-start mb-2">
+                    <i class="fas fa-robot text-blue-500 mt-1 mr-2"></i>
+                    <span class="bg-white px-3 py-2 rounded-lg rounded-tl-none inline-block border border-slate-100">对话已清空。</span>
+                </div>
+            `;
+        } catch (e) {
+            showToast("清空对话失败", true);
+        }
     }
 </script>
 </body>

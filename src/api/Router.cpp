@@ -10,6 +10,9 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <map>
+#include <cstdlib>
+#include <algorithm>
 
 #include <mutex>
 #include <thread>
@@ -53,6 +56,39 @@ namespace
             }
         }
         return escaped;
+    }
+
+    std::string get_query_value(const std::string &uri, const std::string &key)
+    {
+        std::string marker = key + "=";
+        size_t pos = uri.find(marker);
+        if (pos == std::string::npos)
+            return "";
+        std::string value = uri.substr(pos + marker.size());
+        size_t amp = value.find("&");
+        if (amp != std::string::npos)
+            value = value.substr(0, amp);
+        return smartnas::utils::HashUtil::url_decode(value);
+    }
+
+    std::string normalize_dir(std::string dir)
+    {
+        if (dir.empty())
+            return "/";
+        if (dir[0] != '/')
+            dir = "/" + dir;
+        while (dir.size() > 1 && dir.back() == '/')
+            dir.pop_back();
+        if (dir.find("..") != std::string::npos)
+            return "/";
+        return dir;
+    }
+
+    std::string random_token()
+    {
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+        std::string seed = std::to_string(now) + std::to_string(std::rand());
+        return smartnas::utils::HashUtil::sha256(seed.c_str(), seed.size()).substr(0, 32);
     }
 }
 namespace smartnas
@@ -180,13 +216,49 @@ namespace smartnas
             {
                 handle_login(server_task);
             }
-            else if (uri == "/api/list" && method == "GET")
+            else if (uri.rfind("/api/list", 0) == 0 && method == "GET")
             {
                 handle_list_files(server_task);
             }
             else if (uri.rfind("/api/delete", 0) == 0 && method == "POST")
             {
                 handle_delete(server_task);
+            }
+            else if (uri.rfind("/api/restore", 0) == 0 && method == "POST")
+            {
+                handle_restore(server_task);
+            }
+            else if (uri.rfind("/api/purge", 0) == 0 && method == "POST")
+            {
+                handle_purge(server_task);
+            }
+            else if (uri.rfind("/api/rename", 0) == 0 && method == "POST")
+            {
+                handle_rename_file(server_task);
+            }
+            else if (uri.rfind("/api/move", 0) == 0 && method == "POST")
+            {
+                handle_move_file(server_task);
+            }
+            else if (uri.rfind("/api/folders", 0) == 0 && method == "GET")
+            {
+                handle_folders(server_task);
+            }
+            else if (uri.rfind("/api/folders", 0) == 0 && method == "POST")
+            {
+                handle_create_folder(server_task);
+            }
+            else if (uri.rfind("/api/stats", 0) == 0 && method == "GET")
+            {
+                handle_stats(server_task);
+            }
+            else if (uri.rfind("/api/share/create", 0) == 0 && method == "POST")
+            {
+                handle_create_share(server_task);
+            }
+            else if (uri.rfind("/share/download", 0) == 0 && method == "GET")
+            {
+                handle_share_download(server_task);
             }
             else if (uri.rfind("/api/v1/files/search", 0) == 0 && method == "GET")
             {
@@ -327,6 +399,7 @@ namespace smartnas
 
             std::string username = get_authenticated_user(req);
             std::string encoded_filename = "unknown.bin"; // 默认名
+            std::string directory = "/";
 
             // 1. 扫描 Header 获取文件名
             protocol::HttpHeaderCursor cursor(req);
@@ -335,6 +408,8 @@ namespace smartnas
             {
                 if (h_name == "File-Name" || h_name == "file-name")
                     encoded_filename = h_value;
+                if (h_name == "Directory" || h_name == "directory")
+                    directory = normalize_dir(smartnas::utils::HashUtil::url_decode(h_value));
             }
 
             // 2. 解码文件名
@@ -396,8 +471,6 @@ namespace smartnas
                 // 但在数据库里记录它的“真名”
                 meta.storage_path = "../../var/data/" + file_hash + ".bin";
                 meta.upload_time = std::chrono::system_clock::now().time_since_epoch().count();
-                meta.owner = username;
-
                 // 摘要由外部服务通过独立 API 写入，上传路径不依赖额外服务。
                 meta.summary = "";
                 db.save_file_metadata(meta);
@@ -415,6 +488,13 @@ namespace smartnas
             auto *req = task->get_req();
             auto *resp = task->get_resp();
             std::string uri = req->get_request_uri();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("{\"error\":\"Authentication required\"}");
+                return;
+            }
 
             size_t hash_pos = uri.find("hash=");
             size_t total_pos = uri.find("total=");
@@ -465,6 +545,13 @@ namespace smartnas
         {
             auto *req = task->get_req();
             auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("{\"error\":\"Authentication required\"}");
+                return;
+            }
             protocol::HttpHeaderCursor cursor(req);
             std::string h_name, h_value, hash, index_str;
             while (cursor.next(h_name, h_value))
@@ -503,7 +590,7 @@ namespace smartnas
             }
 
             protocol::HttpHeaderCursor cursor(req);
-            std::string h_name, h_value, hash, fname, total_chunks_str, size_str;
+            std::string h_name, h_value, hash, fname, total_chunks_str, size_str, directory = "/";
             while (cursor.next(h_name, h_value))
             {
                 if (h_name == "File-Hash")
@@ -514,6 +601,8 @@ namespace smartnas
                     total_chunks_str = h_value;
                 if (h_name == "File-Size")
                     size_str = h_value;
+                if (h_name == "Directory")
+                    directory = normalize_dir(utils::HashUtil::url_decode(h_value));
             }
             if (hash.empty() || total_chunks_str.empty())
             {
@@ -539,6 +628,14 @@ namespace smartnas
                 std::string final_filename = hash + ".bin";
                 if (core::FileManager::merge_chunks(hash, std::stoi(total_chunks_str), final_filename))
                 {
+                    std::string merged_data;
+                    if (!core::FileManager::load_file(final_filename, merged_data) || utils::HashUtil::sha256(merged_data.data(), merged_data.size()) != hash)
+                    {
+                        core::FileManager::delete_file(final_filename);
+                        resp->set_status_code("400");
+                        resp->append_output_body("{\"error\":\"Hash verification failed\"}");
+                        return;
+                    }
                     status_msg = "File merged and indexed.";
                     should_save_metadata = true;
                 }
@@ -558,6 +655,7 @@ namespace smartnas
                 meta.storage_path = "../../var/data/" + hash + ".bin";
                 meta.upload_time = std::chrono::system_clock::now().time_since_epoch().count();
                 meta.owner = username;
+                meta.directory = directory;
 
                 // 摘要由外部服务通过独立 API 写入，上传路径不依赖额外服务。
                 meta.summary = "";
@@ -594,13 +692,8 @@ namespace smartnas
             std::string hash = uri.substr(pos + 5);
 
             auto &db = smartnas::db::DatabaseManager::get_instance();
-            if (db.delete_file_metadata(hash, username))
+            if (db.soft_delete_file_metadata(hash, username))
             {
-                // 检查是否还有其他用户引用此文件
-                if (db.count_file_references(hash) == 0)
-                {
-                    smartnas::core::FileManager::delete_file(hash + ".bin");
-                }
                 resp->set_status_code("200");
                 resp->append_output_body("{\"status\":\"success\"}");
             }
@@ -611,12 +704,249 @@ namespace smartnas
             }
         }
 
+        void Router::handle_restore(WFHttpTask *server_task)
+        {
+            auto *req = server_task->get_req();
+            auto *resp = server_task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            if (hash.empty())
+            {
+                resp->set_status_code("400");
+                return;
+            }
+            if (db::DatabaseManager::get_instance().restore_file_metadata(hash, username))
+                resp->append_output_body("{\"status\":\"success\"}");
+            else
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found\"}");
+            }
+        }
+
+        void Router::handle_purge(WFHttpTask *server_task)
+        {
+            auto *req = server_task->get_req();
+            auto *resp = server_task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            if (hash.empty())
+            {
+                resp->set_status_code("400");
+                return;
+            }
+            auto &db = db::DatabaseManager::get_instance();
+            if (db.delete_file_metadata(hash, username))
+            {
+                if (db.count_file_references(hash) == 0)
+                    core::FileManager::delete_file(hash + ".bin");
+                resp->append_output_body("{\"status\":\"success\"}");
+            }
+            else
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found\"}");
+            }
+        }
+
+        void Router::handle_rename_file(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            std::string name = get_query_value(req->get_request_uri(), "name");
+            if (hash.empty() || name.empty() || name.find("/") != std::string::npos)
+            {
+                resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Invalid hash or name\"}");
+                return;
+            }
+            if (db::DatabaseManager::get_instance().rename_file(username, hash, name))
+                resp->append_output_body("{\"status\":\"success\"}");
+            else
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found\"}");
+            }
+        }
+
+        void Router::handle_move_file(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            std::string directory = normalize_dir(get_query_value(req->get_request_uri(), "dir"));
+            if (hash.empty())
+            {
+                resp->set_status_code("400");
+                return;
+            }
+            db::DatabaseManager::get_instance().create_folder(username, directory);
+            if (db::DatabaseManager::get_instance().move_file(username, hash, directory))
+                resp->append_output_body("{\"status\":\"success\"}");
+            else
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found\"}");
+            }
+        }
+
+        void Router::handle_folders(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            auto folders = db::DatabaseManager::get_instance().get_user_folders(username);
+            std::string json = "[";
+            for (size_t i = 0; i < folders.size(); ++i)
+            {
+                json += "{\"path\":\"" + escape_json_string(folders[i].path) + "\",\"createdTime\":" + std::to_string(folders[i].created_time) + "}";
+                if (i + 1 < folders.size())
+                    json += ",";
+            }
+            json += "]";
+            resp->add_header_pair("Content-Type", "application/json");
+            resp->append_output_body(json);
+        }
+
+        void Router::handle_create_folder(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string path = normalize_dir(get_query_value(req->get_request_uri(), "path"));
+            if (path == "/")
+            {
+                resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Cannot create root\"}");
+                return;
+            }
+            if (db::DatabaseManager::get_instance().create_folder(username, path))
+                resp->append_output_body("{\"status\":\"success\"}");
+            else
+            {
+                resp->set_status_code("500");
+                resp->append_output_body("{\"error\":\"Failed to create folder\"}");
+            }
+        }
+
+        void Router::handle_stats(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            auto files = db::DatabaseManager::get_instance().get_user_files(username, "/");
+            auto deleted = db::DatabaseManager::get_instance().get_deleted_files(username);
+            long long usage = db::DatabaseManager::get_instance().get_user_storage_usage(username);
+            std::string json = "{\"usage\":" + std::to_string(usage) + ",\"rootFiles\":" + std::to_string(files.size()) + ",\"deletedFiles\":" + std::to_string(deleted.size()) + "}";
+            resp->add_header_pair("Content-Type", "application/json");
+            resp->append_output_body(json);
+        }
+
+        void Router::handle_create_share(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                return;
+            }
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            int hours = 24;
+            std::string hours_str = get_query_value(req->get_request_uri(), "hours");
+            if (!hours_str.empty())
+                hours = std::max(1, std::min(720, std::stoi(hours_str)));
+            if (hash.empty() || !db::DatabaseManager::get_instance().user_has_file(username, hash))
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found\"}");
+                return;
+            }
+            std::string token = random_token();
+            long long expires = (std::chrono::system_clock::now() + std::chrono::hours(hours)).time_since_epoch().count();
+            if (!db::DatabaseManager::get_instance().create_share(token, username, hash, expires))
+            {
+                resp->set_status_code("500");
+                return;
+            }
+            std::string json = "{\"status\":\"success\",\"token\":\"" + token + "\",\"url\":\"/share/download?token=" + token + "\",\"expiresAt\":" + std::to_string(expires) + "}";
+            resp->add_header_pair("Content-Type", "application/json");
+            resp->append_output_body(json);
+        }
+
+        void Router::handle_share_download(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            std::string token = get_query_value(req->get_request_uri(), "token");
+            core::ShareMetadata share;
+            if (token.empty() || !db::DatabaseManager::get_instance().get_share(token, share))
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("Share not found");
+                return;
+            }
+            long long now = std::chrono::system_clock::now().time_since_epoch().count();
+            if (share.expires_at < now)
+            {
+                resp->set_status_code("410");
+                resp->append_output_body("Share expired");
+                return;
+            }
+            core::FileMetadata meta;
+            if (!db::DatabaseManager::get_instance().get_user_file_metadata(share.owner, share.file_hash, meta))
+            {
+                resp->set_status_code("404");
+                return;
+            }
+            serve_file_with_range(task, share.file_hash, meta, true);
+        }
+
         void Router::handle_home(WFHttpTask *task)
         {
             auto *resp = task->get_resp();
 
             // 1. 打开网页文件
-            std::ifstream file("../web/index.html");
+            std::ifstream file("../../web/index.html");
             if (file.is_open())
             {
                 // 2. 将文件内容读取到内存缓冲区
@@ -657,17 +987,43 @@ namespace smartnas
                 return;
             }
 
+            std::string uri = req->get_request_uri();
+            std::string directory = normalize_dir(get_query_value(uri, "dir"));
+            bool deleted = get_query_value(uri, "deleted") == "1";
+
             // 3. 从数据库读取该用户的文件列表
             // 确保你的 DatabaseManager.cpp 里已经实现了 get_user_files
-            auto files = db::DatabaseManager::get_instance().get_user_files(username);
+            auto files = deleted ? db::DatabaseManager::get_instance().get_deleted_files(username)
+                                 : db::DatabaseManager::get_instance().get_user_files(username, directory);
+            auto folders = db::DatabaseManager::get_instance().get_user_folders(username);
 
             // 4. 手动构造 JSON 字符串
-            std::string json = "[";
+            std::string json = "{\"directory\":\"" + escape_json_string(directory) + "\",\"folders\":[";
+            bool first_folder = true;
+            if (!deleted)
+            {
+                std::string prefix = directory == "/" ? "/" : directory + "/";
+                for (const auto &folder : folders)
+                {
+                    if (folder.path == directory)
+                        continue;
+                    if (folder.path.rfind(prefix, 0) != 0)
+                        continue;
+                    std::string rest = folder.path.substr(prefix.size());
+                    if (rest.empty() || rest.find("/") != std::string::npos)
+                        continue;
+                    if (!first_folder)
+                        json += ",";
+                    json += "{\"name\":\"" + escape_json_string(rest) + "\",\"path\":\"" + escape_json_string(folder.path) + "\",\"createdTime\":" + std::to_string(folder.created_time) + "}";
+                    first_folder = false;
+                }
+            }
+            json += "],\"files\":[";
             for (size_t i = 0; i < files.size(); ++i)
             {
                 json += "{";
-                json += "\"name\":\"" + files[i].filename + "\",";
-                json += "\"hash\":\"" + files[i].file_hash + "\",";
+                json += "\"name\":\"" + escape_json_string(files[i].filename) + "\",";
+                json += "\"hash\":\"" + escape_json_string(files[i].file_hash) + "\",";
 
                 // 格式化大小
                 double kb = files[i].file_size / 1024.0;
@@ -676,12 +1032,16 @@ namespace smartnas
 
                 json += "\"size\":\"" + std::string(size_buf) + "\",";
                 json += "\"rawSize\":" + std::to_string(files[i].file_size) + ",";
-                json += "\"uploadTime\":" + std::to_string(files[i].upload_time);
+                json += "\"uploadTime\":" + std::to_string(files[i].upload_time) + ",";
+                json += "\"summary\":\"" + escape_json_string(files[i].summary) + "\",";
+                json += "\"directory\":\"" + escape_json_string(files[i].directory) + "\",";
+                json += "\"deleted\":" + std::to_string(files[i].deleted) + ",";
+                json += "\"deletedTime\":" + std::to_string(files[i].deleted_time);
                 json += "}";
                 if (i < files.size() - 1)
                     json += ",";
             }
-            json += "]";
+            json += "]}";
 
             resp->append_output_body(json.c_str(), json.size());
         }
@@ -690,6 +1050,14 @@ namespace smartnas
         {
             auto *req = server_task->get_req();
             auto *resp = server_task->get_resp();
+
+            std::string current_user = get_authenticated_user(req);
+            if (current_user.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("Authentication required");
+                return;
+            }
 
             std::string uri = req->get_request_uri();
             size_t pos = uri.find("hash=");
@@ -708,7 +1076,7 @@ namespace smartnas
             }
 
             smartnas::core::FileMetadata meta;
-            if (!smartnas::db::DatabaseManager::get_instance().get_file_metadata(hash, meta))
+            if (!smartnas::db::DatabaseManager::get_instance().get_user_file_metadata(current_user, hash, meta))
             {
                 resp->set_status_code("404");
                 resp->append_output_body("File not found in database");
@@ -749,19 +1117,10 @@ namespace smartnas
 
             // 3. 从数据库获取元数据
             smartnas::core::FileMetadata meta;
-            if (!smartnas::db::DatabaseManager::get_instance().get_file_metadata(hash, meta))
+            if (!smartnas::db::DatabaseManager::get_instance().get_user_file_metadata(current_user, hash, meta))
             {
                 resp->set_status_code("404");
                 resp->append_output_body("Error: File not found in database");
-                return;
-            }
-
-            // 4. 【核心安全修复】权限检查：只有主人才能预览
-            // 如果你在开发演示阶段想允许匿名预览，可以暂时注释掉这段，但面试时一定要提到！
-            if (!smartnas::db::DatabaseManager::get_instance().user_has_file(current_user, hash))
-            {
-                resp->set_status_code("403"); // Forbidden
-                resp->append_output_body("Error: You do not have permission to view this file.");
                 return;
             }
 

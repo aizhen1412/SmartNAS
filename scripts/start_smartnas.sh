@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-export SMARTNAS_MODEL_PATH="${SMARTNAS_MODEL_PATH:-$ROOT_DIR/models/llm/qwen2.5-7b-instruct}"
+export SMARTNAS_MODEL_PATH="${SMARTNAS_MODEL_PATH:-$ROOT_DIR/models/llm/qwen2.5-7b-instruct-q4_k_m.gguf}"
 export SMARTNAS_CORE_API="${SMARTNAS_CORE_API:-http://127.0.0.1:8080}"
 
 if [[ ! -f "$ROOT_DIR/build/Makefile" ]]; then

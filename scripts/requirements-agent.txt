@@ -8,3 +8,6 @@ pydantic
 torch
 transformers
 accelerate
+llama-cpp-python
+markitdown[pdf,docx,pptx,xlsx]
+Pillow

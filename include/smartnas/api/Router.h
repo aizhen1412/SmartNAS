@@ -28,9 +28,18 @@ namespace smartnas
             static void handle_login(WFHttpTask *task);
             static void handle_list_files(WFHttpTask *task);
             static void handle_delete(WFHttpTask *task);
+            static void handle_restore(WFHttpTask *task);
+            static void handle_purge(WFHttpTask *task);
             static void handle_home(WFHttpTask *task);
             static void handle_search_files(WFHttpTask *task);
             static void handle_update_file_summary(WFHttpTask *task);
+            static void handle_rename_file(WFHttpTask *task);
+            static void handle_move_file(WFHttpTask *task);
+            static void handle_folders(WFHttpTask *task);
+            static void handle_create_folder(WFHttpTask *task);
+            static void handle_stats(WFHttpTask *task);
+            static void handle_create_share(WFHttpTask *task);
+            static void handle_share_download(WFHttpTask *task);
         };
 
     } // namespace api
