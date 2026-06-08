@@ -1,309 +1,235 @@
-# SmartNAS —— 技术选型详细说明（Architecture Rationale）
-
-本章节详细阐述 SmartNAS 各核心技术的**选择依据、替代方案对比与架构价值**。
-
----
-
-# 1️⃣ 编程语言：C++20
-
-## 为什么选择 C++20？
-
-SmartNAS 的核心目标是：
-
-- 极致性能
-- 可控资源管理
-- 高并发 I/O
-- GPU 推理集成
-- 系统级优化能力
-
-C++ 是少数能够：
-
-- 直接操作系统调用（epoll / sendfile）
-- 深度集成 CUDA
-- 与高性能 AI 推理库无缝结合
-- 同时实现零运行时开销抽象
-
-的语言。
-
-C++20 相比旧标准的优势：
-
-### ① Concepts
-
-- 在编译期约束模板参数
-- 替代 SFINAE 黑魔法
-- 提高泛型代码可读性与安全性
-- 减少难以理解的编译报错
-
-### ② Ranges
-
-- 构建声明式数据流
-- 避免中间容器拷贝
-- 提升代码表达力与性能
-
-### ③ 协程（预留扩展）
-
-虽然当前核心使用异步框架，但 C++20 协程为未来网络层重构提供可能。
-
-### ④ RAII + 智能指针
-
-- deterministic resource management
-- 避免 GC 停顿
-- 适合高吞吐服务器场景
-
----
-
-# 2️⃣ 网络调度核心：Sogou Workflow
-
-## 为什么选择 Workflow？
-
-这是一个工业级异步调度框架，核心优势在于：
-
-- 纯回调式异步模型
-- 计算与网络线程分离
-- 内置 MySQL / Redis 异步客户端
-- 基于 epoll 的高性能事件循环
-
-## 架构核心优势
-
-### ① Compute-Network 分离模型
-
-AI 推理（GPU 矩阵运算）耗时较长。
-
-如果使用传统线程池模型：
-
-- 可能阻塞 I/O 线程
-- 导致吞吐下降
-
-Workflow 将：
-
-- 网络 I/O 任务
-- 计算任务（AI 推理）
-
-分离调度，避免互相影响。
-
-## 为什么不选 Boost.Asio / libuv？
-
-| 方案 | 问题 |
-|------|------|
-| Boost.Asio | 需要自行构建大量基础设施 |
-| libuv | 更适合 Node.js 生态 |
-| 自研 Reactor | 开发成本高，稳定性风险大 |
-
-Workflow 已提供成熟工程能力。
-
----
-
-# 3️⃣ 多模态推理：ONNX Runtime（GPU 版）
-
-## 选择依据
-
-SmartNAS 的核心能力是：
-
-> 语义向量生成
-
-模型为 CLIP。
-
-ONNX Runtime 优势：
-
-- 支持 CUDA 加速
-- 支持 Tensor Core
-- 支持模型量化
-- 跨平台推理引擎
-
-## 为什么不用 PyTorch C++ API？
-
-| 方案 | 问题 |
-|------|------|
-| PyTorch | 依赖重，部署复杂 |
-| TensorRT | 对模型转换要求高 |
-| ONNX Runtime | 轻量、通用、生产级 |
-
-## 性能收益
-
-- RTX 3060 Tensor Core 加速
-- 相比 CPU 提升 20 倍以上
-
----
-
-# 4️⃣ 向量数据库：Faiss
-
-## 为什么选择 Faiss？
-
-语义搜索本质是：
-
-> 高维向量近似最近邻（ANN）
-
-Faiss 优势：
-
-- 成熟 ANN 实现
-- 支持 IVF-PQ
-- 支持 GPU 加速
-- 亿级数据支持
-
-## 为什么不选 Milvus？
-
-Milvus 是分布式系统，SmartNAS 是：
-
-> 单机边缘系统
-
-Faiss 更轻量。
-
-## IVF-PQ 的意义
-
-- 倒排索引减少候选集
-- 乘积量化降低内存占用
-- 在性能与精度之间取得平衡
-
----
-
-# 5️⃣ 高性能文件 I/O：Linux sendfile
-
-## 选择依据
-
-传统文件下载流程：
-
-用户态缓冲区中转
-
-造成：
-
-- CPU 拷贝开销
-- 多次上下文切换
-
-sendfile 实现：
-
-> 零拷贝（Zero-Copy）
-
-数据路径：
-
-Page Cache → Socket Buffer
-
-无需进入用户空间。
-
-## 为什么不使用 read/write？
-
-read/write 会：
-
-- 产生两次内存拷贝
-- 增加 CPU 负担
-
-sendfile 更适合大文件传输。
-
----
-
-# 6️⃣ 存储层：MySQL 8.0 + Redis
-
-## 分层设计理念
-
-- MySQL：元数据持久化
-- Redis：高频状态缓存
-
-## 为什么不是 PostgreSQL？
-
-MySQL 生态成熟：
-
-- 运维成本低
-- 社区支持强
-- Workflow 原生支持
-
-## Redis 的作用
-
-- 分片上传状态机
-- Bitmap 记录块完成情况
-- Set 维护分片集合
-
-支持秒级断点续传。
-
----
-
-# 7️⃣ JSON 解析：simdjson
-
-## 选择依据
-
-API 层 JSON 解析是高频操作。
-
-simdjson：
-
-- 使用 AVX2 / AVX-512
-- 单核 GB/s 解析能力
-
-## 为什么不用 nlohmann/json？
-
-| 方案 | 问题 |
-|------|------|
-| nlohmann | 易用但性能低 |
-| RapidJSON | 性能好但不如 SIMD |
-| simdjson | 极致性能 |
-
-在高 QPS 场景下降低 CPU 占用。
-
----
-
-# 8️⃣ 日志系统：spdlog
-
-## 选择依据
-
-高频日志会成为性能瓶颈。
-
-spdlog：
-
-- header-only
-- 异步写盘
-- 高性能格式化
-
-## 为什么不用 glog？
-
-glog：
-
-- Google 风格
-- 但同步写盘为主
-- 性能不如 spdlog
-
----
-
-# 9️⃣ 二期规划：llama.cpp
-
-## 为什么选择 llama.cpp？
-
-目标：
-
-> 本地部署轻量大模型
-
-优势：
-
-- 支持 4-bit 量化
-- 支持 CPU / GPU 混合推理
-- 单机部署简单
-
-规划模型：
-
-Qwen2.5 1.5B
-
-## 未来能力
-
-- 文档摘要
-- 本地问答
-- RAG 增强检索
-- 语义重排序
-
----
-
-# 🧠 总体架构哲学
-
-SmartNAS 技术选型遵循三条原则：
-
-1. 单机极致性能优先
-2. 零冗余抽象
-3. 边缘算力最大化利用
-
----
-
-# 🎯 最终目标
-
-在个人 PC / NAS 上实现：
-
-- 高并发
-- 毫秒级语义检索
-- 本地 AI 推理
-- 零隐私泄露
-
-构建真正属于个人的数据智能系统。
+# SmartNAS
+
+SmartNAS 是一个面向个人 NAS / 家庭服务器的智能网盘实验项目。核心服务使用 C++ 实现文件管理和 HTTP API，Agent 服务使用 Python 接入本地大模型与 MarkItDown，为网盘文件提供摘要、Markdown 转换和文件问答能力。
+
+项目当前目标不是做一个复杂的企业网盘，而是先把“个人文件存储 + 局域网访问 + 本地 AI 理解文件内容”跑通，并逐步补齐安全、检索和自动化能力。
+
+## 当前功能
+
+### 网盘核心
+
+- 用户注册、登录和 JWT 鉴权。
+- 文件上传、下载、预览。
+- 大文件分片上传、断点续传和 SHA-256 合并校验。
+- 文件列表、目录浏览、文件夹创建。
+- 文件重命名、移动。
+- 回收站：删除、恢复、彻底删除。
+- 文件分享链接，支持过期时间。
+- 文件统计信息。
+- 文件名、摘要的简单搜索。
+- SQLite 元数据存储，文件本体按内容 hash 存放在 `var/data`。
+- 单页 Web UI，入口由核心服务直接提供。
+
+### Agent / AI 能力
+
+- 使用 MarkItDown 将文件转换为 Markdown。
+- 支持摘要的主要格式：
+  - `pdf`
+  - `docx`
+  - `pptx`
+  - `xlsx`
+  - `txt`
+  - `csv`
+  - `json`
+  - `html`
+- 图片和部分媒体文件支持基础 Markdown/元信息摘要 fallback。
+- 单文件同步摘要。
+- 单文件异步摘要任务。
+- 批量为缺失摘要的文件创建任务。
+- 查看摘要任务状态。
+- 查看文件转换后的 Markdown。
+- 基于文件内容进行问答。
+- Agent 聊天，可调用核心搜索接口查询网盘文件。
+- 支持 GGUF 模型走 `llama.cpp`，也支持 HuggingFace Transformers 目录模型。
+
+## 目录结构
+
+```text
+SmartNAS/
+├── include/                 # C++ 头文件
+├── src/                     # C++ 核心服务
+│   ├── api/                 # HTTP 路由
+│   ├── core/                # 文件存储逻辑
+│   ├── db/                  # SQLite 元数据
+│   └── utils/               # Hash 等工具
+├── scripts/
+│   ├── agent_service.py     # Python Agent 服务
+│   ├── requirements-agent.txt
+│   └── start_smartnas.sh    # 一键启动核心服务 + Agent
+├── web/                     # 前端单页界面
+├── var/
+│   ├── data/                # 文件内容与上传分片
+│   ├── db/                  # SQLite 数据库
+│   └── cache/markdown       # Markdown 转换缓存
+└── models/                  # 本地大模型目录
+```
+
+## 运行环境
+
+### C++ 核心服务
+
+需要：
+
+- Linux
+- CMake
+- C++17 编译器
+- OpenSSL
+- SQLite3
+- Sogou Workflow
+
+### Agent 服务
+
+建议使用 Python 虚拟环境：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r scripts/requirements-agent.txt
+```
+
+Agent 依赖包括 FastAPI、Uvicorn、MarkItDown、llama-cpp-python、Transformers、PyTorch、Pillow 等。
+
+## 启动
+
+推荐使用一键脚本：
+
+```bash
+./scripts/start_smartnas.sh
+```
+
+默认服务地址：
+
+- Web / Core API: `http://127.0.0.1:8080`
+- Agent API: `http://127.0.0.1:8081`
+
+默认模型路径：
+
+```bash
+models/llm/qwen2.5-7b-instruct-q4_k_m.gguf
+```
+
+可以通过环境变量覆盖：
+
+```bash
+export SMARTNAS_MODEL_PATH=/path/to/model.gguf
+export SMARTNAS_CORE_API=http://127.0.0.1:8080
+export SMARTNAS_MAX_NEW_TOKENS=512
+export SMARTNAS_MAX_MARKDOWN_CHARS=12000
+export SMARTNAS_SUMMARY_CHUNK_CHARS=7000
+export SMARTNAS_LLAMA_CONTEXT_SIZE=8192
+export SMARTNAS_CACHE_DIR=var/cache/markdown
+./scripts/start_smartnas.sh
+```
+
+也可以手动构建核心服务：
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/bin/SmartNAS
+```
+
+然后单独启动 Agent：
+
+```bash
+python3 scripts/agent_service.py
+```
+
+## 常用接口
+
+### 核心服务
+
+- `GET /`：Web UI。
+- `GET /ping`：健康检查。
+- `POST /register`：注册。
+- `POST /login`：登录。
+- `POST /upload`：普通上传。
+- `GET /api/upload/init`：分片上传初始化。
+- `POST /api/upload/chunk`：上传分片。
+- `POST /api/upload/merge`：合并分片。
+- `GET /api/list`：文件列表。
+- `GET /download`：下载文件。
+- `GET /api/preview`：预览文件。
+- `POST /api/delete`：移入回收站。
+- `POST /api/restore`：恢复文件。
+- `POST /api/purge`：彻底删除。
+- `POST /api/rename`：重命名。
+- `POST /api/move`：移动。
+- `GET /api/folders`：列出目录。
+- `POST /api/folders`：创建目录。
+- `GET /api/stats`：统计信息。
+- `POST /api/share/create`：创建分享链接。
+- `GET /share/{token}`：通过分享链接下载。
+- `GET /api/v1/files/search`：搜索文件。
+- `POST /api/v1/files/summary`：更新文件摘要。
+
+### Agent 服务
+
+- `GET /api/agent/health`：Agent 健康检查和模型状态。
+- `POST /api/agent/summarize`：同步生成摘要。
+- `POST /api/agent/summarize/start`：异步生成摘要。
+- `GET /api/agent/summarize/status/{task_id}`：查询任务状态。
+- `GET /api/agent/summarize/tasks`：查询最近任务。
+- `POST /api/agent/summarize/missing`：为缺失摘要的文件创建任务。
+- `GET /api/agent/markdown/{file_hash}`：查看转换后的 Markdown。
+- `POST /api/agent/file_qa`：针对单个文件问答。
+- `POST /api/agent/chat`：Agent 聊天。
+- `POST /api/agent/clear_history`：清除会话历史。
+
+## 已知限制
+
+- 当前更适合局域网和个人实验环境，尚未按公网服务标准加固。
+- JWT secret 仍需要改为外部配置。
+- 密码存储需要升级为 bcrypt 或 Argon2。
+- 下载、Agent 转换和前端 hash 计算仍有大文件内存压力。
+- 分片上传需要更严格的 hash、index、大小和用户会话校验。
+- 回收站、分享、Agent 任务还需要进一步完善权限边界。
+- 批量摘要当前主要处理列表接口返回的文件，深层目录自动遍历仍需增强。
+- 图片摘要目前主要依赖元信息或 fallback，真正的 OCR / 视觉模型理解仍属于后续功能。
+
+## 预期功能
+
+### 近期
+
+- 修复高优先级安全问题：路径校验、上传归属、删除文件访问、JWT/密码安全。
+- 分享管理：查看、撤销、设置密码、下载次数限制。
+- 大文件流式下载、流式 hash、Agent 流式转换。
+- 目录递归操作：递归移动、删除、恢复、统计。
+- 摘要任务持久化和按用户隔离。
+- UI 继续简化，减少重复按钮，提升移动端体验。
+
+### 中期
+
+- 全文索引和向量检索。
+- RAG 文件问答，支持多文件、多目录上下文。
+- 图片 OCR、音视频转写和多模态摘要。
+- 文件标签、收藏、最近访问。
+- 配额、限速、审计日志。
+- 管理员页面和系统状态页面。
+
+### 长期
+
+- 更完整的本地智能数据管家能力。
+- 自动分类、自动命名、重复文件清理。
+- 私有化模型管理和多模型路由。
+- 更成熟的插件/任务系统。
+
+## 技术选型
+
+- C++17：核心服务、文件 I/O、路由和元数据操作。
+- Sogou Workflow：HTTP 服务和异步网络框架。
+- OpenSSL：SHA-256、JWT 签名相关加密能力。
+- SQLite：轻量级本地元数据存储。
+- jwt-cpp：JWT 编解码。
+- FastAPI / Uvicorn：Agent HTTP 服务。
+- MarkItDown：Office、PDF、文本类文件到 Markdown 的转换。
+- llama.cpp / Transformers：本地大模型推理。
+
+## 项目定位
+
+SmartNAS 的最终方向是一个完全由自己掌控的智能网盘：
+
+- 文件保存在本地。
+- 摘要和问答尽量在本地模型完成。
+- 网盘能力和 AI 能力解耦，核心服务即使没有模型也能独立运行。
+- 优先保证个人 NAS 场景下的可用性，再逐步补齐安全与规模化能力。
