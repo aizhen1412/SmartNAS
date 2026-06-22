@@ -571,13 +571,34 @@ namespace smartnas
 
             if (!hash.empty() && !index_str.empty())
             {
-                core::FileManager::save_chunk(hash, std::stoi(index_str), body, size);
+                int chunk_index = -1;
+                try
+                {
+                    chunk_index = std::stoi(index_str);
+                }
+                catch (const std::exception &)
+                {
+                    resp->set_status_code("400");
+                    resp->append_output_body("{\"error\":\"Invalid chunk index\"}");
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
+
+                if (chunk_index < 0 || !core::FileManager::save_chunk(hash, chunk_index, body, size))
+                {
+                    resp->set_status_code("500");
+                    resp->append_output_body("{\"error\":\"Failed to save chunk; check var/data permissions and disk space\"}");
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
                 resp->append_output_body("{\"status\":\"ok\"}");
                 resp->add_header_pair("Content-Type", "application/json");
             }
             else
             {
                 resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Missing file hash or chunk index\"}");
+                resp->add_header_pair("Content-Type", "application/json");
             }
         }
 
@@ -608,9 +629,33 @@ namespace smartnas
                 if (h_name == "Directory")
                     directory = normalize_dir(utils::HashUtil::url_decode(h_value));
             }
-            if (hash.empty() || total_chunks_str.empty())
+            if (hash.empty() || total_chunks_str.empty() || size_str.empty())
             {
                 resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Missing merge headers\"}");
+                resp->add_header_pair("Content-Type", "application/json");
+                return;
+            }
+
+            int total_chunks = 0;
+            long long expected_size = 0;
+            try
+            {
+                total_chunks = std::stoi(total_chunks_str);
+                expected_size = std::stoll(size_str);
+            }
+            catch (const std::exception &)
+            {
+                resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Invalid merge headers\"}");
+                resp->add_header_pair("Content-Type", "application/json");
+                return;
+            }
+            if (total_chunks < 0 || expected_size < 0)
+            {
+                resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Invalid chunk count or file size\"}");
+                resp->add_header_pair("Content-Type", "application/json");
                 return;
             }
 
@@ -630,24 +675,53 @@ namespace smartnas
             else
             {
                 std::string final_filename = hash + ".bin";
-                if (core::FileManager::merge_chunks(hash, std::stoi(total_chunks_str), final_filename))
+                for (int i = 0; i < total_chunks; ++i)
                 {
-                    std::string merged_data;
-                    if (!core::FileManager::load_file(final_filename, merged_data) || utils::HashUtil::sha256(merged_data.data(), merged_data.size()) != hash)
+                    if (!core::FileManager::chunk_exists(hash, i))
                     {
-                        core::FileManager::delete_file(final_filename);
-                        resp->set_status_code("400");
-                        resp->append_output_body("{\"error\":\"Hash verification failed\"}");
+                        resp->set_status_code("409");
+                        std::string error = "{\"error\":\"Missing chunk\",\"chunk\":" + std::to_string(i) + "}";
+                        resp->append_output_body(error.c_str(), error.size());
+                        resp->add_header_pair("Content-Type", "application/json");
                         return;
                     }
-                    status_msg = "File merged and indexed.";
-                    should_save_metadata = true;
                 }
-                else
+
+                if (!core::FileManager::merge_chunks(hash, total_chunks, final_filename))
                 {
                     resp->set_status_code("500");
+                    resp->append_output_body("{\"error\":\"Failed to create merged file; check var/data permissions and disk space\"}");
+                    resp->add_header_pair("Content-Type", "application/json");
                     return;
                 }
+
+                const size_t actual_size = core::FileManager::get_file_size(final_filename);
+                if (actual_size != static_cast<size_t>(expected_size))
+                {
+                    core::FileManager::delete_file(final_filename);
+                    resp->set_status_code("400");
+                    std::string error = "{\"error\":\"Merged file size mismatch\",\"expected\":" +
+                                        std::to_string(expected_size) + ",\"actual\":" + std::to_string(actual_size) + "}";
+                    resp->append_output_body(error.c_str(), error.size());
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
+
+                const std::string actual_hash = utils::HashUtil::sha256_file("../../var/data/" + final_filename);
+                if (actual_hash.empty() || actual_hash != hash)
+                {
+                    core::FileManager::delete_file(final_filename);
+                    resp->set_status_code("400");
+                    std::string error = "{\"error\":\"Hash verification failed\",\"expected\":\"" + hash +
+                                        "\",\"actual\":\"" + actual_hash + "\"}";
+                    resp->append_output_body(error.c_str(), error.size());
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
+
+                core::FileManager::delete_chunks(hash, total_chunks);
+                status_msg = "File merged and indexed.";
+                should_save_metadata = true;
             }
 
             if (should_save_metadata)
@@ -655,7 +729,7 @@ namespace smartnas
                 core::FileMetadata meta;
                 meta.filename = utils::HashUtil::url_decode(fname);
                 meta.file_hash = hash;
-                meta.file_size = std::stoll(size_str);
+                meta.file_size = expected_size;
                 meta.storage_path = "../../var/data/" + hash + ".bin";
                 meta.upload_time = std::chrono::system_clock::now().time_since_epoch().count();
                 meta.owner = username;

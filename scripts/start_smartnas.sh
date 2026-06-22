@@ -9,13 +9,17 @@ export SMARTNAS_DEEPSEEK_MODEL="${SMARTNAS_DEEPSEEK_MODEL:-deepseek-chat}"
 export SMARTNAS_MAX_NEW_TOKENS="${SMARTNAS_MAX_NEW_TOKENS:-256}"
 export SMARTNAS_CORE_API="${SMARTNAS_CORE_API:-http://127.0.0.1:8080}"
 
+mkdir -p "$ROOT_DIR/var/data" "$ROOT_DIR/var/db"
+if [[ ! -w "$ROOT_DIR/var/data" || ! -w "$ROOT_DIR/var/db" ]]; then
+    echo "SmartNAS data directories are not writable: $ROOT_DIR/var/data or $ROOT_DIR/var/db" >&2
+    exit 1
+fi
+
 if [[ ! -f "$ROOT_DIR/build/Makefile" ]]; then
     cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build"
 fi
 
-if [[ ! -x "$ROOT_DIR/build/bin/SmartNAS" ]]; then
-    cmake --build "$ROOT_DIR/build"
-fi
+cmake --build "$ROOT_DIR/build"
 
 (
     cd "$ROOT_DIR/build/bin"

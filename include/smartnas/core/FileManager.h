@@ -22,6 +22,7 @@ namespace smartnas
             static bool save_chunk(const std::string &hash, int chunk_index, const void *data, size_t size);
             static bool chunk_exists(const std::string &hash, int chunk_index);
             static bool merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename);
+            static void delete_chunks(const std::string &hash, int total_chunks);
 
             // 零拷贝 / 范围读取支持
             static bool pread_file(const std::string &filename, size_t offset, size_t length, std::string &out_data);

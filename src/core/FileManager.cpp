@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <filesystem>
+#include <vector>
 
 namespace smartnas
 {
@@ -74,11 +76,28 @@ namespace smartnas
 
         bool FileManager::save_chunk(const std::string &hash, int chunk_index, const void *data, size_t size)
         {
+            std::error_code error;
+            std::filesystem::create_directories("../../var/data", error);
+            if (error)
+            {
+                std::cerr << "[FileManager] 无法创建数据目录: " << error.message() << std::endl;
+                return false;
+            }
+
             std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(chunk_index);
             std::ofstream outfile(filepath, std::ios::binary | std::ios::trunc);
             if (!outfile.is_open())
+            {
+                std::cerr << "[FileManager] 无法写入分片: " << filepath << std::endl;
                 return false;
+            }
             outfile.write(static_cast<const char *>(data), size);
+            outfile.close();
+            if (!outfile)
+            {
+                std::cerr << "[FileManager] 分片写入不完整: " << filepath << std::endl;
+                return false;
+            }
             return true;
         }
 
@@ -91,22 +110,59 @@ namespace smartnas
 
         bool FileManager::merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename)
         {
-            std::string final_path = "../../var/data/" + final_filename;
-            std::ofstream outfile(final_path, std::ios::binary | std::ios::trunc);
-            if (!outfile.is_open())
-                return false;
-
+            std::vector<std::string> chunk_paths;
+            chunk_paths.reserve(total_chunks);
             for (int i = 0; i < total_chunks; ++i)
             {
                 std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(i);
                 std::ifstream infile(filepath, std::ios::binary);
                 if (!infile.is_open())
-                    return false; // 缺少分片
+                {
+                    std::cerr << "[FileManager] 缺少分片: " << filepath << std::endl;
+                    return false;
+                }
+                chunk_paths.push_back(filepath);
+            }
+
+            std::string final_path = "../../var/data/" + final_filename;
+            std::ofstream outfile(final_path, std::ios::binary | std::ios::trunc);
+            if (!outfile.is_open())
+            {
+                std::cerr << "[FileManager] 无法创建合并文件: " << final_path << std::endl;
+                return false;
+            }
+
+            for (const auto &filepath : chunk_paths)
+            {
+                std::ifstream infile(filepath, std::ios::binary);
                 outfile << infile.rdbuf();
-                infile.close();
+                if (!outfile)
+                {
+                    std::cerr << "[FileManager] 合并写入失败: " << final_path << std::endl;
+                    outfile.close();
+                    std::remove(final_path.c_str());
+                    return false;
+                }
+            }
+
+            outfile.close();
+            if (!outfile)
+            {
+                std::cerr << "[FileManager] 合并文件落盘失败: " << final_path << std::endl;
+                std::remove(final_path.c_str());
+                return false;
+            }
+
+            return true;
+        }
+
+        void FileManager::delete_chunks(const std::string &hash, int total_chunks)
+        {
+            for (int i = 0; i < total_chunks; ++i)
+            {
+                std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(i);
                 std::remove(filepath.c_str());
             }
-            return true;
         }
 
         size_t FileManager::get_file_size(const std::string &filename)
