@@ -180,6 +180,10 @@ namespace smartnas
             {
                 handle_home(server_task);
             }
+            else if (uri == "/vendor/hash-wasm-sha256.umd.min.js" && method == "GET")
+            {
+                handle_hash_wasm_script(server_task);
+            }
             else if (uri == "/ping")
             {
                 handle_ping(req, resp);
@@ -968,6 +972,26 @@ namespace smartnas
                 resp->add_header_pair("Content-Type", "text/html");
             }
         }
+
+        void Router::handle_hash_wasm_script(WFHttpTask *task)
+        {
+            auto *resp = task->get_resp();
+            std::ifstream file("../../web/vendor/hash-wasm-sha256.umd.min.js", std::ios::binary);
+            if (!file.is_open())
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("Vendor script not found");
+                return;
+            }
+
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            const std::string content = buffer.str();
+            resp->add_header_pair("Content-Type", "application/javascript; charset=utf-8");
+            resp->add_header_pair("Cache-Control", "public, max-age=31536000, immutable");
+            resp->append_output_body(content.c_str(), content.size());
+        }
+
         void Router::handle_list_files(WFHttpTask *task)
         {
             auto *req = task->get_req();

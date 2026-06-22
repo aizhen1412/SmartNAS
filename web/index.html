@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SmartNAS | 你的私有智能云</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/vendor/hash-wasm-sha256.umd.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -1057,11 +1058,11 @@
                 const initRes = await fetch(`${API_BASE}/api/upload/init?hash=${fileHash}&total=${totalChunks}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
-                const initData = await initRes.json();
+                const initData = await readUploadResponse(initRes, "校验文件状态");
 
                 if (initData.status === "exists") { // 秒传逻辑由合并接口处理或在此截断
                     // 秒传可以直接调用 merge 让后端处理元数据
-                    await fetch(`${API_BASE}/api/upload/merge`, {
+                    const instantMergeRes = await fetch(`${API_BASE}/api/upload/merge`, {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${token}`, 'File-Name': originalName,
@@ -1069,6 +1070,7 @@
                             'Directory': encodeURIComponent(currentDir)
                         }
                     });
+                    await readUploadResponse(instantMergeRes, "创建秒传记录");
                     showToast("上传结果: Hit! Seconds-Transfer success.");
                     fetchFileList();
                     if (isSummarizableFile(file.name)) startSummarizeByHash(fileHash, { silent: true });
@@ -1086,7 +1088,7 @@
 
                     showToast(`正在上传分片 ${i + 1}/${missingChunks.length}...`);
 
-                    await fetch(`${API_BASE}/api/upload/chunk`, {
+                    const chunkRes = await fetch(`${API_BASE}/api/upload/chunk`, {
                         method: 'POST',
                         headers: {
                             'File-Hash': fileHash,
@@ -1095,6 +1097,7 @@
                         },
                         body: chunk
                     });
+                    await readUploadResponse(chunkRes, `上传分片 ${chunkIndex + 1}`);
                 }
 
                 showToast("合并文件...");
@@ -1108,7 +1111,7 @@
                         'Directory': encodeURIComponent(currentDir)
                     }
                 });
-                const mergeData = await mergeRes.json();
+                const mergeData = await readUploadResponse(mergeRes, "合并文件");
                 showToast("上传结果: " + mergeData.message);
                 fetchFileList();
                 if (isSummarizableFile(file.name)) startSummarizeByHash(fileHash, { silent: true });
@@ -1118,6 +1121,26 @@
             } finally {
                 input.value = '';
             }
+        }
+
+        async function readUploadResponse(response, stage) {
+            const text = await response.text();
+            let data = null;
+            if (text) {
+                try {
+                    data = JSON.parse(text);
+                } catch (error) {
+                    if (response.ok) {
+                        throw new Error(`${stage}失败: 服务器返回了无效响应`);
+                    }
+                }
+            }
+
+            if (!response.ok) {
+                const detail = data?.error || data?.message || text || response.statusText || "未知错误";
+                throw new Error(`${stage}失败 (${response.status}): ${detail}`);
+            }
+            return data || {};
         }
 
         const SHA256_CONSTANTS = new Uint32Array([
@@ -1276,8 +1299,10 @@
         }
 
         async function calculateFileHash(file, onProgress) {
-            const HASH_CHUNK_SIZE = 4 * 1024 * 1024;
-            const hasher = new Sha256();
+            const wasmAvailable = Boolean(globalThis.hashwasm?.createSHA256);
+            const HASH_CHUNK_SIZE = wasmAvailable ? 16 * 1024 * 1024 : 4 * 1024 * 1024;
+            const hasher = wasmAvailable ? await globalThis.hashwasm.createSHA256() : new Sha256();
+            if (wasmAvailable) hasher.init();
 
             for (let offset = 0; offset < file.size; offset += HASH_CHUNK_SIZE) {
                 const end = Math.min(offset + HASH_CHUNK_SIZE, file.size);
@@ -1287,7 +1312,7 @@
             }
 
             if (file.size === 0 && onProgress) onProgress(0, 0);
-            return hasher.hex();
+            return wasmAvailable ? hasher.digest("hex") : hasher.hex();
         }
 
         function downloadByHash(hash) {
