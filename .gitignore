@@ -15,10 +15,7 @@ var/
 *.sqlite
 
 # --- AI 模型文件 ---
-models/**/*.onnx
-models/**/*.gguf
-models/**/*.bin
-models/**/*.safetensors
+models/
 
 # --- IDE 配置 ---
 .vscode/

@@ -10,26 +10,99 @@
     <style>
         :root {
             color-scheme: light;
+            --blue: #1f6df2;
+            --blue-2: #4fb3ff;
+            --line: #dfe7f3;
+            --muted: #64748b;
+            --ink: #172033;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
-            background: #f6f7fb;
-            color: #1f2937;
+            background:
+                radial-gradient(circle at 18% -8%, rgba(79, 179, 255, 0.16), transparent 28%),
+                linear-gradient(180deg, #fbfdff 0%, #f4f7fb 100%);
+            color: var(--ink);
             min-height: 100vh;
+            letter-spacing: 0;
+        }
+
+        .topbar {
+            height: 76px;
+            border-bottom: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.86);
+            backdrop-filter: blur(18px);
+        }
+
+        .brand-mark {
+            width: 44px;
+            height: 32px;
+            position: relative;
+            flex: 0 0 auto;
+        }
+
+        .brand-mark span {
+            position: absolute;
+            border-radius: 999px;
+            filter: drop-shadow(0 7px 14px rgba(31, 109, 242, 0.18));
+        }
+
+        .brand-mark span:nth-child(1) {
+            width: 28px;
+            height: 28px;
+            left: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #56d2ff, #2284ff);
+        }
+
+        .brand-mark span:nth-child(2) {
+            width: 31px;
+            height: 31px;
+            left: 13px;
+            top: 0;
+            background: linear-gradient(135deg, #55c8ff, #1765e8);
+        }
+
+        .brand-mark span:nth-child(3) {
+            width: 29px;
+            height: 24px;
+            left: 22px;
+            bottom: 0;
+            background: linear-gradient(135deg, #3b91ff, #735cff);
+        }
+
+        .sidebar {
+            width: 240px;
+            border-right: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        .nav-item {
+            height: 47px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 0 18px;
+            color: #26364f;
+            font-weight: 650;
+            transition: all 0.18s ease;
+        }
+
+        .nav-item.active,
+        .nav-item:hover {
+            color: var(--blue);
+            background: linear-gradient(90deg, rgba(31, 109, 242, 0.12), rgba(31, 109, 242, 0.04));
         }
 
         .glass-card {
-            background: #fff;
+            background: rgba(255, 255, 255, 0.92);
             border-radius: 8px;
-            border: 1px solid #e5e7eb;
-            box-shadow: none;
-        }
-
-        .app-shell {
-            background: transparent;
-            border: 0;
-            border-radius: 8px;
-            box-shadow: none;
+            border: 1px solid var(--line);
+            box-shadow: 0 12px 32px rgba(31, 50, 86, 0.07);
         }
 
         .primary-btn,
@@ -40,46 +113,75 @@
         }
 
         .primary-btn {
-            background: #1f2937;
+            background: linear-gradient(135deg, #176df5, #0957de);
             color: white;
+            box-shadow: 0 9px 20px rgba(31, 109, 242, 0.24);
         }
 
         .primary-btn:hover {
-            background: #111827;
+            transform: translateY(-1px);
+            box-shadow: 0 12px 26px rgba(31, 109, 242, 0.3);
         }
 
         .ghost-btn {
             background: white;
-            border: 1px solid #dbe3ee;
-            color: #334155;
+            border: 1px solid var(--line);
+            color: #21324b;
         }
 
         .ghost-btn:hover {
-            border-color: #9fb0c7;
-            background: #f8fafc;
+            border-color: #b9c9dd;
+            background: #f8fbff;
         }
 
         .icon-btn {
-            width: 30px;
-            height: 30px;
+            width: 34px;
+            height: 34px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             border: 1px solid transparent;
+            color: #475569;
         }
 
         .icon-btn:hover {
-            background: #f1f5f9;
-            border-color: #dbe3ee;
+            background: #f1f6ff;
+            border-color: #cfddf1;
+            color: var(--blue);
+        }
+
+        .metric-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .upload-zone {
+            min-height: 120px;
+            border: 1.5px dashed #a9c7f8;
+            background: rgba(255, 255, 255, 0.66);
+            transition: all 0.18s ease;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--blue);
+            background: #f8fbff;
+        }
+
+        .file-item {
+            min-height: 58px;
         }
 
         .file-item:hover {
-            background: #fafafa;
+            background: #f8fbff;
         }
 
         .summary-text {
             display: -webkit-box;
-            -webkit-line-clamp: 2;
+            -webkit-line-clamp: 1;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -91,33 +193,35 @@
             border-radius: 999px;
             padding: 2px 8px;
             font-size: 11px;
-            font-weight: 600;
+            font-weight: 700;
+            white-space: nowrap;
         }
 
         .compact-toolbar {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
             flex-wrap: wrap;
         }
 
         .segmented {
             display: inline-flex;
-            border: 1px solid #dbe3ee;
+            border: 1px solid var(--line);
             border-radius: 8px;
             background: white;
             overflow: hidden;
         }
 
         .segmented button {
-            padding: 8px 12px;
+            padding: 8px 14px;
             font-size: 13px;
+            font-weight: 650;
             color: #64748b;
         }
 
         .segmented button.active {
-            background: #1f2937;
-            color: white;
+            background: #f1f6ff;
+            color: var(--blue);
         }
 
         .action-menu {
@@ -211,25 +315,54 @@
             transform: translateY(0);
             opacity: 1;
         }
+
+        .chat-panel {
+            min-height: calc(100vh - 112px);
+        }
+
+        #chatHistory::-webkit-scrollbar,
+        #file-list::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #chatHistory::-webkit-scrollbar-thumb,
+        #file-list::-webkit-scrollbar-thumb {
+            background: #cbd8ea;
+            border-radius: 999px;
+        }
+
+        @media (max-width: 1180px) {
+            .sidebar {
+                display: none;
+            }
+        }
     </style>
 </head>
 
-<body class="p-3 md:p-5">
-    <div class="max-w-7xl mx-auto app-shell">
+<body>
+    <div class="min-h-screen">
         <!-- 顶部导航 -->
-        <header class="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-4">
-            <div class="flex items-center space-x-3">
-                <div class="bg-gray-900 p-2 rounded-lg text-white">
-                    <i class="fas fa-server text-xl"></i>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-gray-900">SmartNAS</h1>
-                    <p class="text-xs text-gray-500">私有网盘与智能索引</p>
-                </div>
+        <header class="topbar sticky top-0 z-40 flex items-center px-5 md:px-8">
+            <div class="flex items-center gap-4 w-[240px] shrink-0">
+                <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+                <h1 class="text-2xl font-black text-gray-950">SmartNAS</h1>
             </div>
-            <!-- 动态显示区域 -->
-            <div id="user-info" class="flex items-center space-x-4">
-                <!-- 这里的内容由 JS 动态生成 -->
+            <div class="relative flex-1 max-w-xl ml-4 hidden md:block">
+                <i class="fas fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="搜索文件名或摘要"
+                    class="w-full h-11 pl-11 pr-4 rounded-lg bg-white border border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 focus:outline-none text-sm">
+            </div>
+            <div class="ml-auto flex items-center gap-3">
+                <label class="primary-btn cursor-pointer h-11 px-5 hidden sm:flex items-center gap-2 text-sm font-bold">
+                    <i class="fas fa-arrow-up-from-bracket"></i>
+                    <span>上传文件</span>
+                    <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this)">
+                </label>
+                <button onclick="createFolder()" class="ghost-btn h-11 px-4 hidden sm:flex items-center gap-2 text-sm font-bold" title="新建文件夹">
+                    <i class="far fa-square-plus"></i>
+                    <span>新建文件夹</span>
+                </button>
+                <div id="user-info" class="flex items-center gap-3"></div>
             </div>
         </header>
 
@@ -311,113 +444,125 @@
         </div>
         <div id="actionMenu" class="action-menu"></div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <aside class="lg:col-span-4 xl:col-span-3 space-y-6">
-                <!-- 智能对话小窗 -->
-                <div class="glass-card p-4">
-                    <div class="flex items-center justify-between mb-4">
-                        <h2 class="text-sm font-semibold text-gray-700"><i
-                                class="fas fa-robot text-blue-500 mr-2"></i>Qwen 助手</h2>
-                        <button onclick="clearChatHistory()" class="icon-btn text-gray-400 hover:text-gray-700" title="清空对话">
-                            <i class="fas fa-rotate-left"></i>
-                        </button>
-                    </div>
-                    <div id="chatHistory"
-                        class="space-y-3 mb-3 h-64 overflow-y-auto text-sm text-gray-700 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <div class="flex items-start mb-2">
-                            <i class="fas fa-robot text-blue-500 mt-1 mr-2"></i>
-                            <span class="bg-white px-3 py-2 rounded-lg rounded-tl-none inline-block border border-slate-100">我可以帮你搜索文件摘要，也能回答网盘里的资料问题。</span>
-                        </div>
-                    </div>
-                    <div class="relative flex">
-                        <input type="text" id="chatInput" placeholder="输入问题..." onkeypress="handleChatKeyPress(event)"
-                            class="w-full pl-3 pr-10 py-2 rounded-lg bg-white border border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-0 text-sm">
-                        <button id="chatSendBtn" onclick="sendChatMessage()"
-                            class="absolute right-2 top-2 text-blue-500 hover:text-blue-700">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="glass-card p-4">
-                    <h2 class="text-sm font-semibold text-gray-700 mb-4">智能搜索</h2>
-                    <div class="relative">
-                        <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="搜索文件名或摘要"
-                            class="w-full pl-10 pr-4 py-2 rounded-lg bg-white border border-slate-200 focus:ring-2 focus:ring-blue-200 focus:border-blue-400">
-                        <i class="fas fa-magnifying-glass absolute left-3 top-3 text-blue-400"></i>
-                    </div>
-                </div>
-
-                <div class="glass-card p-4">
-                    <h2 class="text-sm font-semibold text-gray-700 mb-4">索引状态</h2>
-                    <div class="grid grid-cols-3 gap-3 text-center">
-                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
-                            <div id="statFiles" class="text-xl font-bold text-gray-900">0</div>
-                            <div class="text-xs text-gray-500 mt-1">文件</div>
-                        </div>
-                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
-                            <div id="statSummaries" class="text-xl font-bold text-emerald-600">0</div>
-                            <div class="text-xs text-gray-500 mt-1">已摘要</div>
-                        </div>
-                        <div class="bg-slate-50 border border-slate-100 rounded-lg p-3">
-                            <div id="statTasks" class="text-xl font-bold text-blue-600">0</div>
-                            <div class="text-xs text-gray-500 mt-1">任务中</div>
-                        </div>
-                    </div>
-                </div>
+        <div class="flex">
+            <aside class="sidebar min-h-[calc(100vh-76px)] p-6 flex flex-col">
+                <nav class="space-y-2">
+                    <button onclick="setTrashView(false)" class="nav-item active w-full"><i class="far fa-folder w-5"></i><span>我的文件</span></button>
+                    <button onclick="setTrashView(true)" class="nav-item w-full"><i class="far fa-trash-can w-5"></i><span>回收站</span></button>
+                </nav>
             </aside>
 
-            <main class="lg:col-span-8 xl:col-span-9">
-                <div class="glass-card overflow-hidden">
-                    <div class="p-4 border-b border-slate-100 flex flex-col md:flex-row md:justify-between md:items-center gap-3 bg-white">
-                        <div>
-                            <h3 class="text-lg font-bold text-gray-900">全部文件</h3>
-                            <p class="text-sm text-gray-500 mt-1">上传后会自动为支持的文档生成可搜索摘要</p>
-                        </div>
-                        <div class="compact-toolbar">
-                            <div class="segmented">
-                                <button id="filesViewBtn" onclick="setTrashView(false)" class="active">文件</button>
-                                <button id="trashViewBtn" onclick="setTrashView(true)">回收站</button>
+            <main class="flex-1 p-5 md:p-6 min-w-0">
+                <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_500px] gap-5">
+                    <section class="min-w-0 space-y-5">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="glass-card p-6 flex items-center gap-5">
+                                <div class="metric-icon bg-blue-50 text-blue-600"><i class="far fa-file text-2xl"></i></div>
+                                <div>
+                                    <h2 class="text-base font-black">文件总数</h2>
+                                    <div id="statFiles" class="mt-4 text-2xl font-black text-gray-950">0</div>
+                                    <div class="text-sm text-slate-500 mt-1">个文件</div>
+                                </div>
                             </div>
-                            <button onclick="createFolder()" class="ghost-btn px-3 py-2 text-sm" title="新建文件夹">
-                                <i class="fas fa-folder-plus"></i>
-                            </button>
-                            <button onclick="summarizeMissing()" class="ghost-btn px-3 py-2 text-sm" title="补全摘要">
-                                <i class="fas fa-list-check"></i>
-                            </button>
-                            <label
-                                class="primary-btn cursor-pointer px-4 py-2 flex items-center space-x-2 text-sm">
-                                <i class="fas fa-cloud-upload-alt"></i>
-                                <span class="font-medium">上传文件</span>
-                                <input type="file" id="fileInput" class="hidden" onchange="uploadFile(this)">
-                            </label>
+                            <div class="glass-card p-6 flex items-center gap-5">
+                                <div class="metric-icon bg-emerald-50 text-emerald-600"><i class="fas fa-layer-group text-2xl"></i></div>
+                                <div>
+                                    <h2 class="text-base font-black">已索引文档</h2>
+                                    <div id="statSummaries" class="mt-4 text-2xl font-black text-gray-950">0</div>
+                                    <div class="text-sm text-slate-500 mt-1">可用于 AI 问答</div>
+                                </div>
+                            </div>
+                            <div class="glass-card p-6 flex items-center gap-5">
+                                <div class="metric-icon bg-violet-50 text-violet-600"><i class="far fa-clock text-2xl"></i></div>
+                                <div>
+                                    <h2 class="text-base font-black">摘要任务</h2>
+                                    <div id="statTasks" class="mt-4 text-2xl font-black text-gray-950">0</div>
+                                    <div class="text-sm text-slate-500 mt-1">正在处理</div>
+                                </div>
+                            </div>
                         </div>
-                    </div>
 
-                    <div id="breadcrumb" class="px-5 py-3 border-b border-slate-100 text-sm text-gray-500 bg-white"></div>
+                        <label class="upload-zone rounded-lg flex items-center justify-center cursor-pointer px-6">
+                            <input type="file" class="hidden" onchange="uploadFile(this)">
+                            <div class="flex items-center gap-4 text-center sm:text-left">
+                                <i class="fas fa-cloud-arrow-up text-4xl text-blue-600"></i>
+                                <div>
+                                    <div class="text-base font-bold">拖拽文件到此处，或 <span class="text-blue-600">点击上传</span></div>
+                                    <div class="text-sm text-slate-500 mt-2">支持单个或批量上传，最大 5 GB/个</div>
+                                </div>
+                            </div>
+                        </label>
 
-                    <div
-                        class="hidden md:grid grid-cols-12 gap-4 px-5 py-3 bg-slate-50 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-slate-100 select-none">
-                        <div class="col-span-6 flex items-center cursor-pointer hover:text-blue-600 transition"
-                            onclick="toggleSort('name')">
-                            名称 <i id="sortIcon_name" class="fas fa-sort ml-2 text-gray-300"></i>
-                        </div>
-                        <div class="col-span-2 flex items-center cursor-pointer hover:text-blue-600 transition"
-                            onclick="toggleSort('time')">
-                            上传时间 <i id="sortIcon_time" class="fas fa-sort ml-2 text-gray-300"></i>
-                        </div>
-                        <div class="col-span-2 flex items-center cursor-pointer hover:text-blue-600 transition"
-                            onclick="toggleSort('size')">
-                            大小 <i id="sortIcon_size" class="fas fa-sort ml-2 text-gray-300"></i>
-                        </div>
-                        <div class="col-span-2 text-right">操作</div>
-                    </div>
+                        <div class="glass-card overflow-hidden">
+                            <div class="p-4 border-b border-slate-100 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 bg-white">
+                                <div>
+                                    <h3 class="text-lg font-black text-gray-950">最近文件</h3>
+                                    <div id="breadcrumb" class="mt-2 text-sm text-slate-500"></div>
+                                </div>
+                                <div class="compact-toolbar">
+                                    <div class="segmented">
+                                        <button id="filesViewBtn" onclick="setTrashView(false)" class="active">全部文件</button>
+                                        <button id="trashViewBtn" onclick="setTrashView(true)">回收站</button>
+                                    </div>
+                                    <button onclick="summarizeMissing()" class="ghost-btn h-10 px-3 text-sm font-bold" title="补全摘要">
+                                        <i class="fas fa-list-check mr-2"></i>补全摘要
+                                    </button>
+                                </div>
+                            </div>
 
-                    <!-- 文件列表动态容器 -->
-                    <div id="file-list" class="divide-y divide-gray-100">
-                        <!-- 初始显示加载中 -->
-                        <div class="p-8 text-center text-gray-400">正在连接服务器...</div>
-                    </div>
+                            <div
+                                class="hidden md:grid grid-cols-12 gap-4 px-5 py-3 bg-slate-50 text-xs font-bold text-slate-500 border-b border-slate-100 select-none">
+                                <div class="col-span-4 flex items-center cursor-pointer hover:text-blue-600 transition"
+                                    onclick="toggleSort('name')">
+                                    名称 <i id="sortIcon_name" class="fas fa-sort ml-2 text-gray-300"></i>
+                                </div>
+                                <div class="col-span-2">类型</div>
+                                <div class="col-span-2 flex items-center cursor-pointer hover:text-blue-600 transition"
+                                    onclick="toggleSort('size')">
+                                    大小 <i id="sortIcon_size" class="fas fa-sort ml-2 text-gray-300"></i>
+                                </div>
+                                <div class="col-span-3 flex items-center cursor-pointer hover:text-blue-600 transition"
+                                    onclick="toggleSort('time')">
+                                    修改时间 <i id="sortIcon_time" class="fas fa-sort ml-2 text-gray-300"></i>
+                                </div>
+                                <div class="col-span-1 text-right">操作</div>
+                            </div>
+
+                            <div id="file-list" class="divide-y divide-slate-100 max-h-[46vh] overflow-y-auto">
+                                <div class="p-8 text-center text-gray-400">正在连接服务器...</div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <aside class="space-y-5">
+                        <div class="glass-card chat-panel p-4 flex flex-col">
+                            <div class="flex items-center justify-between pb-3">
+                                <h2 class="text-lg font-black text-gray-950"><i class="fas fa-wand-magic-sparkles text-blue-600 mr-2"></i>AI 智能助理</h2>
+                                <div class="flex items-center gap-1">
+                                    <button onclick="clearChatHistory()" class="icon-btn" title="清空对话"><i class="fas fa-rotate-left"></i></button>
+                                </div>
+                            </div>
+                            <div id="chatHistory"
+                                class="flex-1 min-h-[360px] max-h-[58vh] overflow-y-auto text-sm text-gray-700 bg-gradient-to-b from-slate-50 to-white p-4 rounded-lg border border-slate-100">
+                                <div class="flex items-start mb-4">
+                                    <div class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mr-3 shrink-0">
+                                        <i class="fas fa-robot"></i>
+                                    </div>
+                                    <span class="bg-white px-4 py-3 rounded-lg rounded-tl-none inline-block border border-slate-100 shadow-sm leading-6">我可以帮你搜索文件摘要，也能回答网盘里的资料问题。</span>
+                                </div>
+                            </div>
+                            <div class="mt-4 border border-slate-200 rounded-lg bg-white p-3">
+                                <div class="relative flex">
+                                    <input type="text" id="chatInput" placeholder="输入问题，Enter 发送" onkeypress="handleChatKeyPress(event)"
+                                        class="w-full pl-2 pr-12 py-2 rounded-lg bg-white focus:outline-none text-sm">
+                                    <button id="chatSendBtn" onclick="sendChatMessage()"
+                                        class="absolute right-0 top-0 w-10 h-10 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
                 </div>
             </main>
         </div>
@@ -466,19 +611,19 @@
 
             if (user && token) {
                 userInfoDiv.innerHTML = `
-                    <div class="flex items-center space-x-3">
-                        <div class="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-slate-800 to-slate-500 rounded-full flex items-center justify-center text-white font-bold shadow-sm">
                             ${user[0].toUpperCase()}
                         </div>
-                        <span class="text-gray-700 font-medium">${user}</span>
-                        <button onclick="logout()" class="text-sm text-red-500 hover:underline">注销</button>
+                        <span class="hidden md:inline text-gray-800 font-bold">${user}</span>
+                        <button onclick="logout()" class="icon-btn" title="注销"><i class="fas fa-chevron-down"></i></button>
                     </div>
                 `;
                 fetchFileList(); // 登录状态下加载文件
             } else {
                 userInfoDiv.innerHTML = `
-                    <button onclick="openModal('loginModal')" class="px-4 py-2 text-blue-600 font-medium">登录</button>
-                    <button onclick="openModal('registerModal')" class="px-6 py-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition">注册</button>
+                    <button onclick="openModal('loginModal')" class="ghost-btn h-10 px-4 text-sm font-bold">登录</button>
+                    <button onclick="openModal('registerModal')" class="primary-btn h-10 px-4 text-sm font-bold">注册</button>
                 `;
                 document.getElementById('file-list').innerHTML = '<div class="p-8 text-center text-gray-400">请先登录以查看文件</div>';
             }
@@ -507,10 +652,8 @@
             input.disabled = !isAuthed;
             input.placeholder = isAuthed ? '输入问题...' : '请先登录后使用 AI 助手';
             sendButton.disabled = !isAuthed;
-            sendButton.classList.toggle('text-gray-300', !isAuthed);
             sendButton.classList.toggle('cursor-not-allowed', !isAuthed);
-            sendButton.classList.toggle('text-blue-500', isAuthed);
-            sendButton.classList.toggle('hover:text-blue-700', isAuthed);
+            sendButton.classList.toggle('opacity-50', !isAuthed);
         }
 
         // --- 核心逻辑：获取文件列表 ---
@@ -683,6 +826,32 @@
             return 'fa-file text-slate-500';
         }
 
+        function getFileTypeLabel(name) {
+            const ext = (name.split('.').pop() || '').toLowerCase();
+            if (!ext || ext === name.toLowerCase()) return '文件';
+            const labels = {
+                pdf: 'PDF',
+                doc: 'DOC',
+                docx: 'DOCX',
+                xls: 'XLS',
+                xlsx: 'XLSX',
+                csv: 'CSV',
+                ppt: 'PPT',
+                pptx: 'PPTX',
+                md: 'Markdown',
+                txt: 'TXT',
+                png: 'PNG',
+                jpg: 'JPG',
+                jpeg: 'JPEG',
+                webp: 'WEBP',
+                json: 'JSON',
+                mp4: 'MP4',
+                mp3: 'MP3',
+                zip: 'ZIP'
+            };
+            return labels[ext] || ext.toUpperCase();
+        }
+
         function isSummarizableFile(name) {
             const ext = (name.split('.').pop() || '').toLowerCase();
             return [
@@ -755,8 +924,8 @@
                 const safeName = escapeHtml(folder.name);
                 const safePath = escapeHtml(folder.path);
                 return `
-                <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition bg-amber-50/40">
-                    <div class="md:col-span-6 flex items-center space-x-3 overflow-hidden">
+                <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition bg-amber-50/30">
+                    <div class="md:col-span-4 flex items-center space-x-3 overflow-hidden">
                         <div class="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
                             <i class="fas fa-folder text-amber-500 text-lg"></i>
                         </div>
@@ -764,7 +933,8 @@
                     </div>
                     <div class="md:col-span-2 text-sm text-gray-400">文件夹</div>
                     <div class="md:col-span-2 text-sm text-gray-400">-</div>
-                    <div class="md:col-span-2 text-right text-xs text-gray-400">点击打开</div>
+                    <div class="md:col-span-3 text-sm text-gray-400">-</div>
+                    <div class="md:col-span-1 text-right text-xs text-gray-400">打开</div>
                 </div>`;
             }).join('');
 
@@ -775,12 +945,13 @@
                 const summary = (file.summary || '').trim();
                 const safeSummary = escapeHtml(summary);
                 const fileIcon = getFileIcon(file.name);
+                const fileType = getFileTypeLabel(file.name);
                 const task = summaryTasksByHash[file.hash];
                 const taskText = task && task.status === 'failed' ? escapeHtml(task.message || '摘要失败') : '';
                 const canSummarize = isSummarizableFile(file.name) && !showingTrash;
                 return `
                 <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition">
-                    <div class="md:col-span-6 flex items-start space-x-3 overflow-hidden">
+                    <div class="md:col-span-4 flex items-start space-x-3 overflow-hidden">
                         <div class="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
                             <i class="far ${fileIcon} text-lg"></i>
                         </div>
@@ -792,9 +963,10 @@
                             <div class="mt-1 text-xs text-gray-500 summary-text">${taskText || (summary ? safeSummary : (canSummarize ? '等待生成摘要' : '暂不参与摘要'))}</div>
                         </div>
                     </div>
-                    <div class="md:col-span-2 text-sm text-gray-500">${formatUploadTime(file.uploadTime)}</div>
+                    <div class="md:col-span-2 text-sm text-gray-500">${fileType}</div>
                     <div class="md:col-span-2 text-sm text-gray-500">${file.size}</div>
-                    <div class="md:col-span-2 flex md:justify-end space-x-1 flex-shrink-0">
+                    <div class="md:col-span-3 text-sm text-gray-500">${formatUploadTime(file.uploadTime)}</div>
+                    <div class="md:col-span-1 flex md:justify-end space-x-1 flex-shrink-0">
                         ${showingTrash ? `
                             <button onclick="restoreByHash('${safeHash}')" class="icon-btn text-emerald-600" title="恢复"><i class="fas fa-rotate-left"></i></button>
                             <button onclick="openFileMenu('${safeHash}', '${encodedName}', ${canSummarize}, event)" class="icon-btn text-slate-600" title="更多"><i class="fas fa-ellipsis"></i></button>

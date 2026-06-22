@@ -5,9 +5,9 @@ langchain
 langchain-community
 langchain-core
 pydantic
-torch
-transformers
-accelerate
-llama-cpp-python
+jinja2>=3.1.0
 markitdown[pdf,docx,pptx,xlsx]
 Pillow
+numpy
+sentence-transformers
+faiss-cpu

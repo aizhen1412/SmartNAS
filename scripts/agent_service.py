@@ -2,6 +2,8 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import hashlib
+import json
 import os
 import requests
 import re
@@ -19,23 +21,28 @@ from urllib.parse import unquote
 from PIL import Image, ExifTags
 
 try:
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import numpy as np
 except Exception as exc:
-    torch = None
-    AutoModelForCausalLM = None
-    AutoTokenizer = None
-    TRANSFORMERS_IMPORT_ERROR = exc
+    np = None
+    NUMPY_IMPORT_ERROR = exc
 else:
-    TRANSFORMERS_IMPORT_ERROR = None
+    NUMPY_IMPORT_ERROR = None
 
 try:
-    from llama_cpp import Llama
+    import faiss
 except Exception as exc:
-    Llama = None
-    LLAMA_CPP_IMPORT_ERROR = exc
+    faiss = None
+    FAISS_IMPORT_ERROR = exc
 else:
-    LLAMA_CPP_IMPORT_ERROR = None
+    FAISS_IMPORT_ERROR = None
+
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception as exc:
+    SentenceTransformer = None
+    SENTENCE_TRANSFORMERS_IMPORT_ERROR = exc
+else:
+    SENTENCE_TRANSFORMERS_IMPORT_ERROR = None
 
 try:
     from markitdown import MarkItDown
@@ -57,15 +64,27 @@ app.add_middleware(
 )
 
 NAS_CORE_API = os.getenv("SMARTNAS_CORE_API", "http://127.0.0.1:8080")
-MODEL_PATH = os.getenv("SMARTNAS_MODEL_PATH", "models/llm/qwen2.5-7b-instruct-q4_k_m.gguf")
-MAX_NEW_TOKENS = int(os.getenv("SMARTNAS_MAX_NEW_TOKENS", "512"))
+DEEPSEEK_API_KEY = os.getenv("SMARTNAS_DEEPSEEK_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_BASE = os.getenv("SMARTNAS_DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+DEEPSEEK_MODEL = os.getenv("SMARTNAS_DEEPSEEK_MODEL", "deepseek-chat")
+MAX_NEW_TOKENS = int(os.getenv("SMARTNAS_MAX_NEW_TOKENS", "256"))
+GENERATION_TEMPERATURE = float(os.getenv("SMARTNAS_GENERATION_TEMPERATURE", "0.7"))
+GENERATION_TOP_P = float(os.getenv("SMARTNAS_GENERATION_TOP_P", "0.8"))
+DEEPSEEK_TIMEOUT = float(os.getenv("SMARTNAS_DEEPSEEK_TIMEOUT", "60"))
 MAX_MARKDOWN_CHARS = int(os.getenv("SMARTNAS_MAX_MARKDOWN_CHARS", "12000"))
 SUMMARY_CHUNK_CHARS = int(os.getenv("SMARTNAS_SUMMARY_CHUNK_CHARS", "7000"))
-LLAMA_CONTEXT_SIZE = int(os.getenv("SMARTNAS_LLAMA_CONTEXT_SIZE", "8192"))
 CACHE_DIR = Path(os.getenv("SMARTNAS_CACHE_DIR", "var/cache/markdown"))
-model_bundle = None
+VECTOR_DIR = Path(os.getenv("SMARTNAS_VECTOR_DIR", "var/cache/vector"))
+EMBEDDING_MODEL_NAME = os.getenv("SMARTNAS_EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+RAG_CHUNK_CHARS = int(os.getenv("SMARTNAS_RAG_CHUNK_CHARS", "900"))
+RAG_CHUNK_OVERLAP = int(os.getenv("SMARTNAS_RAG_CHUNK_OVERLAP", "120"))
+RAG_TOP_K = int(os.getenv("SMARTNAS_RAG_TOP_K", "6"))
+RAG_MIN_SCORE = float(os.getenv("SMARTNAS_RAG_MIN_SCORE", "0.28"))
+embedding_model = None
 markitdown_converter = None
-model_generation_lock = threading.Lock()
+llm_request_lock = threading.Lock()
+embedding_generation_lock = threading.Lock()
+vector_store_lock = threading.Lock()
 summary_executor = ThreadPoolExecutor(max_workers=1)
 summary_tasks: Dict[str, Dict[str, Any]] = {}
 summary_tasks_lock = threading.Lock()
@@ -121,47 +140,9 @@ class FileQuestionRequest(BaseModel):
     hash: str
     question: str
 
-def get_model_bundle():
-    global model_bundle
-    if model_bundle is not None:
-        return model_bundle
-
-    if not os.path.exists(MODEL_PATH):
-        raise HTTPException(status_code=503, detail=f"模型文件或目录不存在: {MODEL_PATH}")
-
-    if os.path.isfile(MODEL_PATH) and MODEL_PATH.lower().endswith(".gguf"):
-        if Llama is None:
-            raise HTTPException(status_code=503, detail=f"llama-cpp-python 加载失败: {LLAMA_CPP_IMPORT_ERROR}")
-
-        print(f"Loading GGUF model with llama.cpp: {MODEL_PATH}")
-        model = Llama(
-            model_path=MODEL_PATH,
-            n_ctx=LLAMA_CONTEXT_SIZE,
-            n_gpu_layers=-1,
-            verbose=False,
-        )
-        model_bundle = {"backend": "llama.cpp", "model": model}
-        return model_bundle
-
-    if not os.path.isdir(MODEL_PATH):
-        raise HTTPException(status_code=503, detail=f"模型路径必须是 HuggingFace 目录或 GGUF 文件: {MODEL_PATH}")
-    if AutoTokenizer is None or AutoModelForCausalLM is None or torch is None:
-        raise HTTPException(status_code=503, detail=f"transformers/torch 加载失败: {TRANSFORMERS_IMPORT_ERROR}")
-
-    print(f"Loading Transformers model: {MODEL_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(
-        MODEL_PATH,
-        trust_remote_code=True,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_PATH,
-        torch_dtype="auto",
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    model.eval()
-    model_bundle = {"backend": "transformers", "tokenizer": tokenizer, "model": model}
-    return model_bundle
+class RagQueryRequest(BaseModel):
+    query: str
+    top_k: int = RAG_TOP_K
 
 def get_markitdown_converter():
     global markitdown_converter
@@ -174,42 +155,73 @@ def get_markitdown_converter():
     markitdown_converter = MarkItDown()
     return markitdown_converter
 
-def create_chat_completion(messages: List[dict]) -> str:
-    bundle = get_model_bundle()
-    with model_generation_lock:
-        if bundle["backend"] == "llama.cpp":
-            result = bundle["model"].create_chat_completion(
-                messages=messages,
-                max_tokens=MAX_NEW_TOKENS,
-                temperature=0.7,
-                top_p=0.8,
-                repeat_penalty=1.05,
-            )
-            return result["choices"][0]["message"]["content"].strip()
+def get_embedding_model():
+    global embedding_model
+    if embedding_model is not None:
+        return embedding_model
 
-        tokenizer = bundle["tokenizer"]
-        model = bundle["model"]
+    if SentenceTransformer is None:
+        raise HTTPException(status_code=503, detail=f"sentence-transformers 加载失败: {SENTENCE_TRANSFORMERS_IMPORT_ERROR}")
 
-        text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
+    embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+    return embedding_model
+
+def encode_texts(texts: List[str]):
+    if np is None:
+        raise HTTPException(status_code=503, detail=f"numpy 加载失败: {NUMPY_IMPORT_ERROR}")
+    if not texts:
+        return np.zeros((0, 0), dtype="float32")
+
+    model = get_embedding_model()
+    with embedding_generation_lock:
+        vectors = model.encode(
+            texts,
+            batch_size=16,
+            normalize_embeddings=True,
+            show_progress_bar=False,
         )
-        inputs = tokenizer([text], return_tensors="pt")
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    return np.asarray(vectors, dtype="float32")
 
-        with torch.no_grad():
-            generated_ids = model.generate(
-                **inputs,
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.8,
-                repetition_penalty=1.05,
+def create_chat_completion(messages: List[dict]) -> str:
+    if not DEEPSEEK_API_KEY:
+        raise HTTPException(status_code=503, detail="缺少 DeepSeek API Key，请设置 SMARTNAS_DEEPSEEK_API_KEY 或 DEEPSEEK_API_KEY")
+
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+        "max_tokens": MAX_NEW_TOKENS,
+        "temperature": GENERATION_TEMPERATURE,
+        "top_p": GENERATION_TOP_P,
+        "stream": False,
+    }
+
+    try:
+        with llm_request_lock:
+            response = requests.post(
+                f"{DEEPSEEK_API_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=DEEPSEEK_TIMEOUT,
             )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"DeepSeek API 请求失败: {exc}")
 
-        new_tokens = generated_ids[0][inputs["input_ids"].shape[-1]:]
-        return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    if response.status_code != 200:
+        detail = response.text
+        try:
+            detail = response.json().get("error", {}).get("message", detail)
+        except ValueError:
+            pass
+        raise HTTPException(status_code=response.status_code, detail=f"DeepSeek API 返回错误: {detail}")
+
+    try:
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"DeepSeek API 响应格式异常: {exc}")
 
 def require_bearer_token(authorization: Optional[str]) -> str:
     if not authorization or not authorization.startswith("Bearer "):
@@ -244,6 +256,150 @@ def split_text(value: str, max_chars: int) -> List[str]:
         chunks.append("\n".join(current).strip())
 
     return [chunk for chunk in chunks if chunk]
+
+def split_markdown_for_rag(value: str, max_chars: int, overlap: int) -> List[str]:
+    chunks = split_text(value, max_chars)
+    if overlap <= 0 or len(chunks) < 2:
+        return chunks
+
+    overlapped = []
+    previous_tail = ""
+    for chunk in chunks:
+        text = f"{previous_tail}\n{chunk}".strip() if previous_tail else chunk
+        overlapped.append(text)
+        previous_tail = chunk[-overlap:]
+    return overlapped
+
+def vector_namespace(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+
+def vector_namespace_dir(token: str) -> Path:
+    return VECTOR_DIR / vector_namespace(token)
+
+def vector_chunks_path(token: str) -> Path:
+    return vector_namespace_dir(token) / "chunks.json"
+
+def load_vector_chunks(token: str) -> List[Dict[str, Any]]:
+    path = vector_chunks_path(token)
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        return payload.get("chunks", [])
+    return payload if isinstance(payload, list) else []
+
+def save_vector_chunks(token: str, chunks: List[Dict[str, Any]]) -> None:
+    path = vector_chunks_path(token)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "embedding_model": EMBEDDING_MODEL_NAME,
+        "updated_at": int(time.time()),
+        "chunks": chunks,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+def rag_has_file_index(token: str, file_hash: str) -> bool:
+    with vector_store_lock:
+        return any(chunk.get("hash") == file_hash for chunk in load_vector_chunks(token))
+
+def index_markdown_for_rag(file_hash: str, filename: str, markdown_text: str, token: str) -> int:
+    raw_chunks = split_markdown_for_rag(markdown_text[:MAX_MARKDOWN_CHARS * 4], RAG_CHUNK_CHARS, RAG_CHUNK_OVERLAP)
+    raw_chunks = [chunk for chunk in raw_chunks if chunk.strip()]
+    if not raw_chunks:
+        return 0
+
+    vectors = encode_texts(raw_chunks)
+    now = int(time.time())
+    new_chunks = []
+    for index, chunk in enumerate(raw_chunks):
+        new_chunks.append(
+            {
+                "id": f"{file_hash}:{index}",
+                "hash": file_hash,
+                "filename": filename,
+                "chunk_index": index,
+                "text": chunk,
+                "embedding": vectors[index].tolist(),
+                "updated_at": now,
+            }
+        )
+
+    with vector_store_lock:
+        existing = [chunk for chunk in load_vector_chunks(token) if chunk.get("hash") != file_hash]
+        existing.extend(new_chunks)
+        save_vector_chunks(token, existing)
+    return len(new_chunks)
+
+def search_rag_chunks(query: str, token: str, top_k: int = RAG_TOP_K) -> Dict[str, Any]:
+    if not query.strip():
+        return {"available": True, "results": [], "reason": "empty query"}
+
+    with vector_store_lock:
+        chunks = load_vector_chunks(token)
+    chunks = [chunk for chunk in chunks if chunk.get("embedding") and chunk.get("text")]
+    if not chunks:
+        return {"available": True, "results": [], "reason": "empty index"}
+
+    query_vector = encode_texts([query])
+    if query_vector.shape[0] == 0:
+        return {"available": True, "results": [], "reason": "empty query vector"}
+
+    embeddings = np.asarray([chunk["embedding"] for chunk in chunks], dtype="float32")
+    if embeddings.ndim != 2 or embeddings.shape[0] == 0:
+        return {"available": True, "results": [], "reason": "empty embeddings"}
+
+    limit = max(1, min(top_k, len(chunks)))
+    if faiss is not None:
+        index = faiss.IndexFlatIP(embeddings.shape[1])
+        index.add(embeddings)
+        scores, ids = index.search(query_vector, limit)
+        pairs = zip(ids[0].tolist(), scores[0].tolist())
+    else:
+        scores = embeddings @ query_vector[0]
+        order = np.argsort(-scores)[:limit]
+        pairs = ((int(i), float(scores[i])) for i in order)
+
+    results = []
+    for chunk_index, score in pairs:
+        if chunk_index < 0 or score < RAG_MIN_SCORE:
+            continue
+        chunk = chunks[chunk_index]
+        results.append(
+            {
+                "score": round(float(score), 4),
+                "hash": chunk.get("hash"),
+                "filename": chunk.get("filename"),
+                "chunk_index": chunk.get("chunk_index"),
+                "text": chunk.get("text"),
+            }
+        )
+    return {"available": True, "results": results, "reason": None}
+
+def answer_with_rag(question: str, results: List[Dict[str, Any]]) -> str:
+    context = "\n\n".join(
+        (
+            f"[来源 {i + 1}] 文件: {item.get('filename')} "
+            f"片段: {item.get('chunk_index')} 相似度: {item.get('score')}\n"
+            f"{item.get('text')}"
+        )
+        for i, item in enumerate(results)
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是 SmartNAS 的 RAG 文件问答助手。只能根据提供的来源片段回答。"
+                "如果片段无法支持答案，请明确说没有在已索引文件中找到依据。"
+                "回答末尾用“来源：文件名”列出相关文件。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"用户问题：{question}\n\n检索到的来源片段：\n{context}",
+        },
+    ]
+    return create_chat_completion(messages)
 
 def summarize_markdown_chunk(markdown_text: str, title: str = "") -> str:
     heading = f"文件名：{title}\n\n" if title else ""
@@ -466,6 +622,12 @@ def run_summary(file_hash: str, token: str, force: bool = False):
     filename, markdown_text, cache_hit = convert_file_to_markdown(file_hash, token, force)
     summary = build_summary(markdown_text, filename)
     update_core_summary(file_hash, token, summary)
+    rag_status = {"indexed": False, "chunks": 0, "error": None}
+    try:
+        rag_status["chunks"] = index_markdown_for_rag(file_hash, filename, markdown_text, token)
+        rag_status["indexed"] = rag_status["chunks"] > 0
+    except Exception as exc:
+        rag_status["error"] = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
     return {
         "status": "success",
         "filename": filename,
@@ -473,6 +635,7 @@ def run_summary(file_hash: str, token: str, force: bool = False):
         "markdown_chars": len(markdown_text),
         "cache_hit": cache_hit,
         "summary": summary,
+        "rag": rag_status,
     }
 
 def set_summary_task(task_id: str, **updates):
@@ -511,18 +674,30 @@ async def health():
     return {
         "status": "ok",
         "core_api": NAS_CORE_API,
-        "backend": model_bundle["backend"] if model_bundle else ("llama.cpp" if MODEL_PATH.lower().endswith(".gguf") else "transformers"),
-        "model_path": MODEL_PATH,
-        "model_exists": os.path.exists(MODEL_PATH),
-        "model_is_directory": os.path.isdir(MODEL_PATH),
-        "model_is_gguf": os.path.isfile(MODEL_PATH) and MODEL_PATH.lower().endswith(".gguf"),
-        "model_loaded": model_bundle is not None,
-        "transformers_available": AutoModelForCausalLM is not None and AutoTokenizer is not None and torch is not None,
-        "transformers_error": str(TRANSFORMERS_IMPORT_ERROR) if TRANSFORMERS_IMPORT_ERROR else None,
-        "llama_cpp_available": Llama is not None,
-        "llama_cpp_error": str(LLAMA_CPP_IMPORT_ERROR) if LLAMA_CPP_IMPORT_ERROR else None,
+        "llm_provider": "deepseek",
+        "deepseek_api_base": DEEPSEEK_API_BASE,
+        "deepseek_model": DEEPSEEK_MODEL,
+        "deepseek_api_key_configured": bool(DEEPSEEK_API_KEY),
+        "max_tokens": MAX_NEW_TOKENS,
+        "temperature": GENERATION_TEMPERATURE,
+        "top_p": GENERATION_TOP_P,
         "markitdown_available": MarkItDown is not None,
         "markitdown_error": str(MARKITDOWN_IMPORT_ERROR) if MARKITDOWN_IMPORT_ERROR else None,
+        "rag": {
+            "embedding_model": EMBEDDING_MODEL_NAME,
+            "embedding_loaded": embedding_model is not None,
+            "sentence_transformers_available": SentenceTransformer is not None,
+            "sentence_transformers_error": str(SENTENCE_TRANSFORMERS_IMPORT_ERROR) if SENTENCE_TRANSFORMERS_IMPORT_ERROR else None,
+            "numpy_available": np is not None,
+            "numpy_error": str(NUMPY_IMPORT_ERROR) if NUMPY_IMPORT_ERROR else None,
+            "faiss_available": faiss is not None,
+            "faiss_error": str(FAISS_IMPORT_ERROR) if FAISS_IMPORT_ERROR else None,
+            "vector_dir": str(VECTOR_DIR),
+            "chunk_chars": RAG_CHUNK_CHARS,
+            "chunk_overlap": RAG_CHUNK_OVERLAP,
+            "top_k": RAG_TOP_K,
+            "min_score": RAG_MIN_SCORE,
+        },
         "summary_extensions": sorted(SUPPORTED_SUMMARY_EXTENSIONS),
     }
 
@@ -580,9 +755,11 @@ async def summarize_missing_endpoint(authorization: Optional[str] = Header(None)
         name = file_info.get("name", "")
         file_hash = file_info.get("hash", "")
         summary = (file_info.get("summary") or "").strip()
-        if summary or not file_hash:
+        if not file_hash:
             continue
         if Path(name).suffix.lower() not in SUPPORTED_SUMMARY_EXTENSIONS:
+            continue
+        if summary and rag_has_file_index(token, file_hash):
             continue
         tasks.append(enqueue_summary(file_hash, token, False))
 
@@ -623,9 +800,31 @@ async def file_qa_endpoint(request: FileQuestionRequest, authorization: Optional
     answer = create_chat_completion(messages)
     return {"status": "success", "filename": filename, "hash": file_hash, "answer": answer}
 
+@app.post("/api/agent/rag/query")
+async def rag_query_endpoint(request: RagQueryRequest, authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    query = request.query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Missing query")
+    try:
+        search = search_rag_chunks(query, token, request.top_k)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"RAG 检索失败: {exc}")
+
+    answer = ""
+    if search.get("results"):
+        answer = answer_with_rag(query, search["results"])
+    return {"status": "success", "query": query, "answer": answer, **search}
+
 @app.post("/api/agent/chat")
 async def chat_endpoint(request: ChatRequest, authorization: Optional[str] = Header(None)):
     token = require_bearer_token(authorization)
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Missing prompt")
+
     history = sessions.setdefault(token, [])
 
     if not history:
@@ -636,9 +835,33 @@ async def chat_endpoint(request: ChatRequest, authorization: Optional[str] = Hea
         sessions[token] = [history[0]] + history[-5:]
         history = sessions[token]
 
-    history.append({"role": "user", "content": request.prompt})
+    history.append({"role": "user", "content": prompt})
 
     try:
+        try:
+            rag_search = search_rag_chunks(prompt, token, RAG_TOP_K)
+        except Exception as exc:
+            print(f"[RAG] Unavailable, fallback to summary search: {exc}")
+            rag_search = {"available": False, "results": [], "reason": str(exc)}
+
+        if rag_search.get("results"):
+            answer = answer_with_rag(prompt, rag_search["results"])
+            history.append({"role": "assistant", "content": answer})
+            return {
+                "status": "success",
+                "mode": "rag",
+                "response": answer,
+                "sources": [
+                    {
+                        "filename": item.get("filename"),
+                        "hash": item.get("hash"),
+                        "chunk_index": item.get("chunk_index"),
+                        "score": item.get("score"),
+                    }
+                    for item in rag_search["results"]
+                ],
+            }
+
         text = create_chat_completion(history)
 
         match = re.search(r"CALL:\s*search_files\((.*?)\)", text)
@@ -674,7 +897,7 @@ async def chat_endpoint(request: ChatRequest, authorization: Optional[str] = Hea
             return {"status": "success", "response": final_text}
         else:
             history.append({"role": "assistant", "content": text})
-            return {"status": "success", "response": text}
+            return {"status": "success", "mode": "chat", "response": text}
     except HTTPException:
         raise
     except Exception as e:
