@@ -1,4 +1,5 @@
 #include "smartnas/core/FileManager.h"
+#include "smartnas/config/AppConfig.h"
 #include <fstream> // C++ 文件流库
 #include <iostream>
 #include <cstdio>
@@ -7,6 +8,10 @@
 #include <unistd.h>
 #include <filesystem>
 #include <vector>
+#include <array>
+#include <iomanip>
+#include <sstream>
+#include <openssl/evp.h>
 
 namespace smartnas
 {
@@ -15,10 +20,8 @@ namespace smartnas
 
         bool FileManager::save_file(const std::string &filename, const void *data, size_t size)
         {
-            // 1. 拼接最终的存储路径。
-            // 注意：这里的路径是相对路径。因为我们在 build 目录启动程序，
-            // 所以用 "../../var/data/" 指向你根目录的 var/data 文件夹。
-            std::string filepath = "../../var/data/" + filename;
+            // 存储目录由统一配置加载，并在启动时解析为绝对路径。
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(filename).string();
 
             // 2. 创建文件输出流对象 (std::ofstream)
             // std::ios::binary 告诉操作系统：这是二进制文件，不要对换行符做任何瞎篡改！
@@ -44,7 +47,7 @@ namespace smartnas
         }
         bool FileManager::load_file(const std::string &filename, std::string &out_data)
         {
-            std::string filepath = "../../var/data/" + filename;
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(filename).string();
             // 以二进制模式打开文件
             std::ifstream infile(filepath, std::ios::binary);
             if (!infile.is_open())
@@ -64,7 +67,7 @@ namespace smartnas
 
         bool FileManager::delete_file(const std::string &filename)
         {
-            std::string filepath = "../../var/data/" + filename;
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(filename).string();
             if (std::remove(filepath.c_str()) != 0)
             {
                 std::cerr << "[FileManager] 错误: 无法删除文件 -> " << filepath << std::endl;
@@ -77,14 +80,14 @@ namespace smartnas
         bool FileManager::save_chunk(const std::string &hash, int chunk_index, const void *data, size_t size)
         {
             std::error_code error;
-            std::filesystem::create_directories("../../var/data", error);
+            std::filesystem::create_directories(smartnas::config::AppConfig::get_instance().data_dir(), error);
             if (error)
             {
                 std::cerr << "[FileManager] 无法创建数据目录: " << error.message() << std::endl;
                 return false;
             }
 
-            std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(chunk_index);
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(hash + "_chunk_" + std::to_string(chunk_index)).string();
             std::ofstream outfile(filepath, std::ios::binary | std::ios::trunc);
             if (!outfile.is_open())
             {
@@ -103,28 +106,23 @@ namespace smartnas
 
         bool FileManager::chunk_exists(const std::string &hash, int chunk_index)
         {
-            std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(chunk_index);
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(hash + "_chunk_" + std::to_string(chunk_index)).string();
             std::ifstream infile(filepath);
             return infile.good();
         }
 
-        bool FileManager::merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename)
+        bool FileManager::chunk_has_size(const std::string &hash, int chunk_index, size_t expected_size)
         {
-            std::vector<std::string> chunk_paths;
-            chunk_paths.reserve(total_chunks);
-            for (int i = 0; i < total_chunks; ++i)
-            {
-                std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(i);
-                std::ifstream infile(filepath, std::ios::binary);
-                if (!infile.is_open())
-                {
-                    std::cerr << "[FileManager] 缺少分片: " << filepath << std::endl;
-                    return false;
-                }
-                chunk_paths.push_back(filepath);
-            }
+            const std::string filepath = smartnas::config::AppConfig::get_instance().data_path(hash + "_chunk_" + std::to_string(chunk_index)).string();
+            std::error_code error;
+            const auto size = std::filesystem::file_size(filepath, error);
+            return !error && size == expected_size;
+        }
 
-            std::string final_path = "../../var/data/" + final_filename;
+        bool FileManager::merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename,
+                                       std::string &merged_hash, size_t &merged_size)
+        {
+            std::string final_path = smartnas::config::AppConfig::get_instance().data_path(final_filename).string();
             std::ofstream outfile(final_path, std::ios::binary | std::ios::trunc);
             if (!outfile.is_open())
             {
@@ -132,13 +130,50 @@ namespace smartnas
                 return false;
             }
 
-            for (const auto &filepath : chunk_paths)
+            EVP_MD_CTX *digest = EVP_MD_CTX_new();
+            if (!digest || EVP_DigestInit_ex(digest, EVP_sha256(), nullptr) != 1)
             {
+                EVP_MD_CTX_free(digest);
+                outfile.close();
+                std::remove(final_path.c_str());
+                return false;
+            }
+
+            merged_size = 0;
+            std::array<char, 1024 * 1024> buffer;
+            for (int i = 0; i < total_chunks; ++i)
+            {
+                const std::string filepath = smartnas::config::AppConfig::get_instance().data_path(hash + "_chunk_" + std::to_string(i)).string();
                 std::ifstream infile(filepath, std::ios::binary);
-                outfile << infile.rdbuf();
-                if (!outfile)
+                if (!infile.is_open())
                 {
-                    std::cerr << "[FileManager] 合并写入失败: " << final_path << std::endl;
+                    std::cerr << "[FileManager] 缺少分片: " << filepath << std::endl;
+                    EVP_MD_CTX_free(digest);
+                    outfile.close();
+                    std::remove(final_path.c_str());
+                    return false;
+                }
+
+                while (infile)
+                {
+                    infile.read(buffer.data(), buffer.size());
+                    const std::streamsize count = infile.gcount();
+                    if (count <= 0)
+                        continue;
+                    outfile.write(buffer.data(), count);
+                    if (!outfile || EVP_DigestUpdate(digest, buffer.data(), static_cast<size_t>(count)) != 1)
+                    {
+                        std::cerr << "[FileManager] 合并写入或校验失败: " << final_path << std::endl;
+                        EVP_MD_CTX_free(digest);
+                        outfile.close();
+                        std::remove(final_path.c_str());
+                        return false;
+                    }
+                    merged_size += static_cast<size_t>(count);
+                }
+                if (!infile.eof())
+                {
+                    EVP_MD_CTX_free(digest);
                     outfile.close();
                     std::remove(final_path.c_str());
                     return false;
@@ -149,10 +184,25 @@ namespace smartnas
             if (!outfile)
             {
                 std::cerr << "[FileManager] 合并文件落盘失败: " << final_path << std::endl;
+                EVP_MD_CTX_free(digest);
                 std::remove(final_path.c_str());
                 return false;
             }
 
+            unsigned char hash_bytes[EVP_MAX_MD_SIZE];
+            unsigned int hash_length = 0;
+            if (EVP_DigestFinal_ex(digest, hash_bytes, &hash_length) != 1)
+            {
+                EVP_MD_CTX_free(digest);
+                std::remove(final_path.c_str());
+                return false;
+            }
+            EVP_MD_CTX_free(digest);
+
+            std::ostringstream result;
+            for (unsigned int i = 0; i < hash_length; ++i)
+                result << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash_bytes[i]);
+            merged_hash = result.str();
             return true;
         }
 
@@ -160,14 +210,14 @@ namespace smartnas
         {
             for (int i = 0; i < total_chunks; ++i)
             {
-                std::string filepath = "../../var/data/" + hash + "_chunk_" + std::to_string(i);
+                std::string filepath = smartnas::config::AppConfig::get_instance().data_path(hash + "_chunk_" + std::to_string(i)).string();
                 std::remove(filepath.c_str());
             }
         }
 
         size_t FileManager::get_file_size(const std::string &filename)
         {
-            std::string filepath = "../../var/data/" + filename;
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(filename).string();
             struct stat stat_buf;
             if (stat(filepath.c_str(), &stat_buf) == 0)
             {
@@ -178,7 +228,7 @@ namespace smartnas
 
         bool FileManager::pread_file(const std::string &filename, size_t offset, size_t length, std::string &out_data)
         {
-            std::string filepath = "../../var/data/" + filename;
+            std::string filepath = smartnas::config::AppConfig::get_instance().data_path(filename).string();
             int fd = open(filepath.c_str(), O_RDONLY);
             if (fd < 0)
                 return false;

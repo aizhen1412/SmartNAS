@@ -22,13 +22,30 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_library(SQLITE3_LIB sqlite3)
 
-# 7. 定义你的可执行文件，目前只包含 main.cpp
+# 7. 定义核心服务及按领域拆分的 HTTP handlers
 add_executable(SmartNAS
     src/main.cpp
+    src/config/AppConfig.cpp
     src/api/Router.cpp
+    src/api/RouterInternal.cpp
+    src/api/AuthHandlers.cpp
+    src/api/UploadHandlers.cpp
+    src/api/FileMutationHandlers.cpp
+    src/api/FolderHandlers.cpp
+    src/api/ShareHandlers.cpp
+    src/api/StaticHandlers.cpp
+    src/api/FileReadHandlers.cpp
+    src/api/AgentMetadataHandlers.cpp
     src/core/FileManager.cpp
     src/utils/HashUtil.cpp
-    src/db/DatabaseManager.cpp # 【新增】
+    src/db/DatabaseManager.cpp
+    src/db/UserRepository.cpp
+    src/db/FileWriteRepository.cpp
+    src/db/FileLookupRepository.cpp
+    src/db/FileQueryRepository.cpp
+    src/db/FileMutationRepository.cpp
+    src/db/FolderRepository.cpp
+    src/db/ShareRepository.cpp
 )
 
 # 8. 链接第三方库

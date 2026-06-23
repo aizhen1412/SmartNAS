@@ -21,7 +21,10 @@ namespace smartnas
             // 分片上传相关
             static bool save_chunk(const std::string &hash, int chunk_index, const void *data, size_t size);
             static bool chunk_exists(const std::string &hash, int chunk_index);
-            static bool merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename);
+            static bool chunk_has_size(const std::string &hash, int chunk_index, size_t expected_size);
+            // 合并时同步计算 SHA-256 和字节数，避免合并完成后再次完整读取文件。
+            static bool merge_chunks(const std::string &hash, int total_chunks, const std::string &final_filename,
+                                     std::string &merged_hash, size_t &merged_size);
             static void delete_chunks(const std::string &hash, int total_chunks);
 
             // 零拷贝 / 范围读取支持

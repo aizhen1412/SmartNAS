@@ -51,7 +51,7 @@ Additional NAS Core APIs now cover normal cloud-drive workflows:
 
 ## Python Agent Shape
 
-Keep `scripts/agent_service.py` as the service entrypoint:
+Keep `agent/service.py` as the Agent implementation; `scripts/agent_service.py` is the compatibility launcher:
 
 - FastAPI exposes `/api/agent/chat`.
 - FastAPI exposes `/api/agent/summarize`, `/api/agent/summarize/start`, `/api/agent/summarize/status/{task_id}`, and `/api/agent/summarize/missing`.

@@ -24,7 +24,7 @@ namespace smartnas
             bool register_user(const std::string &username, const std::string &password);
             bool authenticate_user(const std::string &username, const std::string &password);
 
-            // --- 文件相关 (重写之前的方法) ---
+            // --- 文件元数据、查询与变更 ---
             bool save_file_metadata(const core::FileMetadata &meta);
             bool update_file_summary(const std::string &owner, const std::string &hash, const std::string &summary);
             bool update_file_tags(const std::string &owner, const std::string &hash, const std::string &tags);
@@ -38,16 +38,19 @@ namespace smartnas
             int count_file_references(const std::string &hash);
             bool exists(const std::string &hash);
             bool user_has_file(const std::string &username, const std::string &hash);
-            // 根据用户名获取该用户的所有文件
             std::vector<core::FileMetadata> get_user_files(const std::string &username, const std::string &directory = "/", bool include_deleted = false);
             std::vector<core::FileMetadata> get_all_user_files(const std::string &username, bool include_deleted = false);
             std::vector<core::FileMetadata> get_deleted_files(const std::string &username);
             long long get_user_storage_usage(const std::string &username);
-            // 根据自然语言关键词在摘要中搜索可能的文件
             std::vector<core::FileMetadata> search_files_by_summary(const std::string &owner, const std::string &keyword);
+
+            // --- 文件夹 ---
             bool create_folder(const std::string &username, const std::string &path);
             bool delete_folder(const std::string &username, const std::string &path);
+            bool move_folder(const std::string &username, const std::string &path, const std::string &new_path);
             std::vector<core::FolderMetadata> get_user_folders(const std::string &username);
+
+            // --- 分享 ---
             bool create_share(const std::string &token, const std::string &username, const std::string &hash, long long expires_at);
             bool get_share(const std::string &token, core::ShareMetadata &out_share);
 

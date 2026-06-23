@@ -8,6 +8,10 @@ lib/
 *.dll
 *.exe
 
+# --- Python 缓存 ---
+__pycache__/
+*.py[cod]
+
 # --- 运行时数据 ---
 var/
 *.log
