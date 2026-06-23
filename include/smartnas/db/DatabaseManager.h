@@ -27,6 +27,7 @@ namespace smartnas
             // --- 文件相关 (重写之前的方法) ---
             bool save_file_metadata(const core::FileMetadata &meta);
             bool update_file_summary(const std::string &owner, const std::string &hash, const std::string &summary);
+            bool update_file_tags(const std::string &owner, const std::string &hash, const std::string &tags);
             bool get_file_metadata(const std::string &hash, core::FileMetadata &out_meta);
             bool get_user_file_metadata(const std::string &username, const std::string &hash, core::FileMetadata &out_meta);
             bool delete_file_metadata(const std::string &hash, const std::string &username);
@@ -39,6 +40,7 @@ namespace smartnas
             bool user_has_file(const std::string &username, const std::string &hash);
             // 根据用户名获取该用户的所有文件
             std::vector<core::FileMetadata> get_user_files(const std::string &username, const std::string &directory = "/", bool include_deleted = false);
+            std::vector<core::FileMetadata> get_all_user_files(const std::string &username, bool include_deleted = false);
             std::vector<core::FileMetadata> get_deleted_files(const std::string &username);
             long long get_user_storage_usage(const std::string &username);
             // 根据自然语言关键词在摘要中搜索可能的文件

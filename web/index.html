@@ -77,6 +77,9 @@
 
         .sidebar {
             width: 240px;
+            height: calc(100vh - 76px);
+            position: sticky;
+            top: 76px;
             border-right: 1px solid var(--line);
             background: rgba(255, 255, 255, 0.72);
         }
@@ -151,27 +154,6 @@
             color: var(--blue);
         }
 
-        .metric-icon {
-            width: 56px;
-            height: 56px;
-            border-radius: 999px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .upload-zone {
-            min-height: 120px;
-            border: 1.5px dashed #a9c7f8;
-            background: rgba(255, 255, 255, 0.66);
-            transition: all 0.18s ease;
-        }
-
-        .upload-zone:hover {
-            border-color: var(--blue);
-            background: #f8fbff;
-        }
-
         .file-item {
             min-height: 58px;
         }
@@ -185,6 +167,28 @@
             -webkit-line-clamp: 1;
             -webkit-box-orient: vertical;
             overflow: hidden;
+        }
+
+        .file-tags {
+            display: flex;
+            gap: 4px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .file-tag {
+            flex: 0 0 auto;
+            max-width: 112px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            border: 1px solid #bfdbfe;
+            border-radius: 4px;
+            padding: 1px 5px;
+            color: #1d4ed8;
+            background: #eff6ff;
+            font-size: 10px;
+            line-height: 16px;
         }
 
         .summary-pill {
@@ -318,7 +322,30 @@
         }
 
         .chat-panel {
-            min-height: calc(100vh - 112px);
+            height: calc(100vh - 116px);
+            min-height: 520px;
+        }
+
+        .sidebar-stats {
+            border-top: 1px solid var(--line);
+            padding-top: 18px;
+        }
+
+        .sidebar-stat {
+            display: grid;
+            grid-template-columns: 32px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            min-height: 44px;
+        }
+
+        .sidebar-stat-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
         }
 
         #chatHistory::-webkit-scrollbar,
@@ -350,7 +377,7 @@
             </div>
             <div class="relative flex-1 max-w-xl ml-4 hidden md:block">
                 <i class="fas fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
-                <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="搜索文件名或摘要"
+                <input type="text" id="searchInput" oninput="applyFilterAndSort()" placeholder="搜索文件名、摘要或标签"
                     class="w-full h-11 pl-11 pr-4 rounded-lg bg-white border border-slate-200 shadow-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 focus:outline-none text-sm">
             </div>
             <div class="ml-auto flex items-center gap-3">
@@ -451,53 +478,32 @@
                     <button onclick="setTrashView(false)" class="nav-item active w-full"><i class="far fa-folder w-5"></i><span>我的文件</span></button>
                     <button onclick="setTrashView(true)" class="nav-item w-full"><i class="far fa-trash-can w-5"></i><span>回收站</span></button>
                 </nav>
+                <div class="sidebar-stats mt-auto space-y-2">
+                    <div class="sidebar-stat">
+                        <span class="sidebar-stat-icon bg-blue-50 text-blue-600"><i class="far fa-file"></i></span>
+                        <span class="text-xs font-semibold text-slate-500">文件总数</span>
+                        <strong id="statFiles" class="text-sm text-gray-950">0</strong>
+                    </div>
+                    <div class="sidebar-stat">
+                        <span class="sidebar-stat-icon bg-emerald-50 text-emerald-600"><i class="fas fa-layer-group"></i></span>
+                        <span class="text-xs font-semibold text-slate-500">已索引</span>
+                        <strong id="statSummaries" class="text-sm text-gray-950">0</strong>
+                    </div>
+                    <div class="sidebar-stat">
+                        <span class="sidebar-stat-icon bg-violet-50 text-violet-600"><i class="far fa-clock"></i></span>
+                        <span class="text-xs font-semibold text-slate-500">处理中</span>
+                        <strong id="statTasks" class="text-sm text-gray-950">0</strong>
+                    </div>
+                </div>
             </aside>
 
             <main class="flex-1 p-5 md:p-6 min-w-0">
-                <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1fr)_500px] gap-5">
-                    <section class="min-w-0 space-y-5">
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div class="glass-card p-6 flex items-center gap-5">
-                                <div class="metric-icon bg-blue-50 text-blue-600"><i class="far fa-file text-2xl"></i></div>
-                                <div>
-                                    <h2 class="text-base font-black">文件总数</h2>
-                                    <div id="statFiles" class="mt-4 text-2xl font-black text-gray-950">0</div>
-                                    <div class="text-sm text-slate-500 mt-1">个文件</div>
-                                </div>
-                            </div>
-                            <div class="glass-card p-6 flex items-center gap-5">
-                                <div class="metric-icon bg-emerald-50 text-emerald-600"><i class="fas fa-layer-group text-2xl"></i></div>
-                                <div>
-                                    <h2 class="text-base font-black">已索引文档</h2>
-                                    <div id="statSummaries" class="mt-4 text-2xl font-black text-gray-950">0</div>
-                                    <div class="text-sm text-slate-500 mt-1">可用于 AI 问答</div>
-                                </div>
-                            </div>
-                            <div class="glass-card p-6 flex items-center gap-5">
-                                <div class="metric-icon bg-violet-50 text-violet-600"><i class="far fa-clock text-2xl"></i></div>
-                                <div>
-                                    <h2 class="text-base font-black">摘要任务</h2>
-                                    <div id="statTasks" class="mt-4 text-2xl font-black text-gray-950">0</div>
-                                    <div class="text-sm text-slate-500 mt-1">正在处理</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <label class="upload-zone rounded-lg flex items-center justify-center cursor-pointer px-6">
-                            <input type="file" class="hidden" onchange="uploadFile(this)">
-                            <div class="flex items-center gap-4 text-center sm:text-left">
-                                <i class="fas fa-cloud-arrow-up text-4xl text-blue-600"></i>
-                                <div>
-                                    <div class="text-base font-bold">拖拽文件到此处，或 <span class="text-blue-600">点击上传</span></div>
-                                    <div class="text-sm text-slate-500 mt-2">支持单个或批量上传，最大 5 GB/个</div>
-                                </div>
-                            </div>
-                        </label>
-
+                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px] gap-5 items-start">
+                    <section class="min-w-0">
                         <div class="glass-card overflow-hidden">
                             <div class="p-4 border-b border-slate-100 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 bg-white">
                                 <div>
-                                    <h3 class="text-lg font-black text-gray-950">最近文件</h3>
+                                    <h3 class="text-base font-black text-gray-950"><i class="far fa-folder-open text-blue-600 mr-2"></i>当前目录</h3>
                                     <div id="breadcrumb" class="mt-2 text-sm text-slate-500"></div>
                                 </div>
                                 <div class="compact-toolbar">
@@ -529,13 +535,13 @@
                                 <div class="col-span-1 text-right">操作</div>
                             </div>
 
-                            <div id="file-list" class="divide-y divide-slate-100 max-h-[46vh] overflow-y-auto">
+                            <div id="file-list" class="divide-y divide-slate-100 max-h-[calc(100vh-220px)] overflow-y-auto">
                                 <div class="p-8 text-center text-gray-400">正在连接服务器...</div>
                             </div>
                         </div>
                     </section>
 
-                    <aside class="space-y-5">
+                    <aside class="xl:sticky xl:top-[96px] self-start">
                         <div class="glass-card chat-panel p-4 flex flex-col">
                             <div class="flex items-center justify-between pb-3">
                                 <h2 class="text-lg font-black text-gray-950"><i class="fas fa-wand-magic-sparkles text-blue-600 mr-2"></i>AI 智能助理</h2>
@@ -544,7 +550,7 @@
                                 </div>
                             </div>
                             <div id="chatHistory"
-                                class="flex-1 min-h-[360px] max-h-[58vh] overflow-y-auto text-sm text-gray-700 bg-gradient-to-b from-slate-50 to-white p-4 rounded-lg border border-slate-100">
+                                class="flex-1 min-h-0 overflow-y-auto text-sm text-gray-700 bg-gradient-to-b from-slate-50 to-white p-4 rounded-lg border border-slate-100">
                                 <div class="flex items-start mb-4">
                                     <div class="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mr-3 shrink-0">
                                         <i class="fas fa-robot"></i>
@@ -559,6 +565,10 @@
                                     <button id="chatSendBtn" onclick="sendChatMessage()"
                                         class="absolute right-0 top-0 w-10 h-10 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
                                         <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                    <button id="chatStopBtn" onclick="stopChatGeneration()" title="停止生成"
+                                        class="hidden absolute right-0 top-0 w-10 h-10 rounded-lg bg-red-600 text-white hover:bg-red-700">
+                                        <i class="fas fa-stop"></i>
                                     </button>
                                 </div>
                             </div>
@@ -621,6 +631,7 @@
                     </div>
                 `;
                 fetchFileList(); // 登录状态下加载文件
+                loadSummaryTasks();
             } else {
                 userInfoDiv.innerHTML = `
                     <button onclick="openModal('loginModal')" class="ghost-btn h-10 px-4 text-sm font-bold">登录</button>
@@ -716,7 +727,8 @@
 
             let filtered = globalFiles.filter(f => {
                 const summary = (f.summary || '').toLowerCase();
-                return f.name.toLowerCase().includes(query) || summary.includes(query);
+                const tags = Array.isArray(f.tags) ? f.tags.join(' ').toLowerCase() : '';
+                return f.name.toLowerCase().includes(query) || summary.includes(query) || tags.includes(query);
             });
 
             filtered.sort((a, b) => {
@@ -735,7 +747,7 @@
         }
 
         function updateStats() {
-            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running'].includes(t.status)).length;
+            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running', 'cancel_requested'].includes(t.status)).length;
             const summarized = globalFiles.filter(f => (f.summary || '').trim()).length;
             const statFiles = document.getElementById('statFiles');
             const statSummaries = document.getElementById('statSummaries');
@@ -865,7 +877,7 @@
 
         function getSummaryBadge(file) {
             const task = summaryTasksByHash[file.hash];
-            if (task && ['pending', 'running'].includes(task.status)) {
+            if (task && ['pending', 'running', 'cancel_requested'].includes(task.status)) {
                 return '<span class="summary-pill summary-running"><i class="fas fa-spinner fa-spin"></i>摘要中</span>';
             }
             if (task && task.status === 'failed') {
@@ -887,6 +899,13 @@
             const menu = document.getElementById('actionMenu');
             const name = decodeURIComponent(encodedName || '');
             const disabledClass = canSummarize ? '' : 'opacity:0.45;pointer-events:none;';
+            const task = summaryTasksByHash[hash];
+            let taskAction = '';
+            if (task && ['pending', 'running', 'cancel_requested'].includes(task.status)) {
+                taskAction = `<button onclick="cancelSummaryTask('${task.id}'); closeActionMenu();"><i class="fas fa-stop"></i>取消任务</button>`;
+            } else if (task && ['failed', 'cancelled'].includes(task.status)) {
+                taskAction = `<button onclick="retrySummaryTask('${task.id}'); closeActionMenu();"><i class="fas fa-rotate-right"></i>重试任务</button>`;
+            }
 
             if (showingTrash) {
                 menu.innerHTML = `
@@ -895,7 +914,8 @@
                 `;
             } else {
                 menu.innerHTML = `
-                    <button onclick="summarizeByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-wand-magic-sparkles"></i>生成摘要</button>
+                    <button onclick="summarizeByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-wand-magic-sparkles"></i>生成摘要和标签</button>
+                    ${taskAction}
                     <button onclick="askFileByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-circle-question"></i>问这个文件</button>
                     <button onclick="showMarkdownByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-file-code"></i>提取文本</button>
                     <button onclick="renameByHash('${hash}', '${encodeURIComponent(name)}'); closeActionMenu();"><i class="fas fa-pen"></i>重命名</button>
@@ -945,6 +965,11 @@
                 const encodedName = encodeURIComponent(file.name || '');
                 const summary = (file.summary || '').trim();
                 const safeSummary = escapeHtml(summary);
+                const tags = Array.isArray(file.tags) ? file.tags : [];
+                const tagsHtml = tags.slice(0, 5).map(tag => {
+                    const safeTag = escapeHtml(String(tag));
+                    return `<span class="file-tag" title="${safeTag}">${safeTag}</span>`;
+                }).join('');
                 const fileIcon = getFileIcon(file.name);
                 const fileType = getFileTypeLabel(file.name);
                 const task = summaryTasksByHash[file.hash];
@@ -962,6 +987,7 @@
                                 ${getSummaryBadge(file)}
                             </div>
                             <div class="mt-1 text-xs text-gray-500 summary-text">${taskText || (summary ? safeSummary : (canSummarize ? '等待生成摘要' : '暂不参与摘要'))}</div>
+                            ${tagsHtml ? `<div class="file-tags">${tagsHtml}</div>` : ''}
                         </div>
                     </div>
                     <div class="md:col-span-2 text-sm text-gray-500">${fileType}</div>
@@ -1337,7 +1363,7 @@
             const silent = Boolean(options.silent);
             if (!token) { if (!silent) showToast("请先登录", true); return; }
 
-            if (!silent) showToast("摘要任务已加入队列");
+            if (!silent) showToast("摘要和标签任务已加入队列");
             try {
                 const response = await fetch(`${AGENT_BASE}/api/agent/summarize/start`, {
                     method: 'POST',
@@ -1379,13 +1405,35 @@
                 (data.tasks || []).forEach(task => {
                     summaryTasksByHash[task.hash] = task;
                 });
-                showToast(`已排队 ${data.queued} 个摘要任务`);
+                showToast(`已排队 ${data.queued} 个摘要和标签任务`);
                 updateStats();
                 applyFilterAndSort();
                 ensureSummaryPolling();
             } catch (e) {
                 console.error("批量摘要失败:", e);
                 showToast(`批量摘要失败: ${e.message}`, true);
+            }
+        }
+
+        async function loadSummaryTasks() {
+            const token = getAuthToken();
+            if (!token) return;
+            try {
+                const response = await fetch(`${AGENT_BASE}/api/agent/summarize/tasks`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) return;
+                const data = await response.json();
+                (data.tasks || []).forEach(task => {
+                    summaryTasksByHash[task.hash] = task;
+                });
+                updateStats();
+                applyFilterAndSort();
+                if (Object.values(summaryTasksByHash).some(task => ['pending', 'running', 'cancel_requested'].includes(task.status))) {
+                    ensureSummaryPolling();
+                }
+            } catch (error) {
+                console.error('加载摘要任务失败:', error);
             }
         }
 
@@ -1399,7 +1447,7 @@
             const token = getAuthToken();
             if (!token) return;
 
-            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running'].includes(t.status));
+            const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running', 'cancel_requested'].includes(t.status));
             if (activeTasks.length === 0) {
                 clearInterval(summaryPollTimer);
                 summaryPollTimer = null;
@@ -1416,10 +1464,10 @@
                     const data = await response.json();
                     if (response.ok) {
                         summaryTasksByHash[data.hash] = data;
-                        if (['success', 'failed'].includes(data.status)) {
+                        if (['success', 'failed', 'cancelled'].includes(data.status)) {
                             shouldRefresh = true;
-                            if (data.status === 'success') showToast("摘要已生成");
-                            if (data.status === 'failed') showToast(`摘要失败: ${data.message}`, true);
+                            if (data.status === 'success') showToast("摘要和标签已生成");
+                            if (data.status === 'failed') showToast(`摘要和标签失败: ${data.message}`, true);
                         }
                     }
                 } catch (e) {
@@ -1429,6 +1477,34 @@
 
             if (shouldRefresh) fetchFileList();
             updateStats();
+            applyFilterAndSort();
+        }
+
+        async function cancelSummaryTask(taskId) {
+            const token = getAuthToken();
+            if (!token) return;
+            const response = await fetch(`${AGENT_BASE}/api/agent/summarize/cancel/${taskId}`, {
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (!response.ok) return showToast(data.detail || '取消任务失败', true);
+            summaryTasksByHash[data.hash] = data;
+            showToast('正在取消任务');
+            ensureSummaryPolling();
+            applyFilterAndSort();
+        }
+
+        async function retrySummaryTask(taskId) {
+            const token = getAuthToken();
+            if (!token) return;
+            const response = await fetch(`${AGENT_BASE}/api/agent/summarize/retry/${taskId}`, {
+                method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (!response.ok) return showToast(data.detail || '重试任务失败', true);
+            summaryTasksByHash[data.hash] = data;
+            showToast('任务已重新加入队列');
+            ensureSummaryPolling();
             applyFilterAndSort();
         }
 
@@ -1608,6 +1684,21 @@
 
 <!-- Chat JS Logic -->
 <script>
+    let chatAbortController = null;
+
+    function setChatGenerating(generating) {
+        const sendButton = document.getElementById('chatSendBtn');
+        const stopButton = document.getElementById('chatStopBtn');
+        const input = document.getElementById('chatInput');
+        if (sendButton) sendButton.classList.toggle('hidden', generating);
+        if (stopButton) stopButton.classList.toggle('hidden', !generating);
+        if (input) input.disabled = generating;
+    }
+
+    function stopChatGeneration() {
+        if (chatAbortController) chatAbortController.abort();
+    }
+
     async function sendChatMessage() {
         const input = document.getElementById('chatInput');
         const text = input.value.trim();
@@ -1618,7 +1709,7 @@
         // 追加用户的消息
         const userMsg = document.createElement('div');
         userMsg.className = 'flex items-start justify-end mb-2';
-        userMsg.innerHTML = `<span class="bg-gray-100 px-3 py-2 rounded-lg rounded-tr-none inline-block text-right text-gray-800">${text}</span><i class="fas fa-user text-gray-400 mt-1 ml-2"></i>`;
+        userMsg.innerHTML = `<span class="bg-gray-100 px-3 py-2 rounded-lg rounded-tr-none inline-block text-right text-gray-800">${escapeHtml(text)}</span><i class="fas fa-user text-gray-400 mt-1 ml-2"></i>`;
         history.appendChild(userMsg);
 
         input.value = '';
@@ -1637,17 +1728,24 @@
                 updateChatAuthState(false);
                 throw new Error("请先登录后再使用 AI 助手");
             }
-            const res = await fetch(`${AGENT_BASE}/api/agent/chat`, {
+            chatAbortController = new AbortController();
+            setChatGenerating(true);
+            const res = await fetch(`${AGENT_BASE}/api/agent/chat/stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ prompt: text })
+                body: JSON.stringify({ prompt: text }),
+                signal: chatAbortController.signal
             });
-            const data = await res.json();
             if (!res.ok) {
-                throw new Error(data.detail || data.message || `AI 服务返回 ${res.status}`);
+                let detail = `AI 服务返回 ${res.status}`;
+                try {
+                    const data = await res.json();
+                    detail = data.detail || data.message || detail;
+                } catch (_) {}
+                throw new Error(detail);
             }
 
             // 移除思考中
@@ -1657,14 +1755,32 @@
             // 准备 AI 回答气泡
             const aiMsg = document.createElement('div');
             aiMsg.className = 'flex items-start mb-2';
-            aiMsg.innerHTML = `<i class="fas fa-robot text-blue-500 mt-1 mr-2"></i><span class="bg-blue-50 px-3 py-2 rounded-lg rounded-tl-none inline-block ai-text"></span>`;
+            aiMsg.innerHTML = `<i class="fas fa-robot text-blue-500 mt-1 mr-2"></i><span class="bg-blue-50 px-3 py-2 rounded-lg rounded-tl-none inline-block ai-text whitespace-pre-wrap"></span>`;
             history.appendChild(aiMsg);
             const aiTextSpan = aiMsg.querySelector('.ai-text');
 
-            if (data.status === "success") {
-                aiTextSpan.innerHTML += data.response.replace(/\n/g, "<br>");
-            } else {
-                aiTextSpan.innerHTML += "Error: " + data.message;
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let answer = '';
+            while (true) {
+                const { value, done } = await reader.read();
+                buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+                const events = buffer.split('\n\n');
+                buffer = events.pop() || '';
+                for (const event of events) {
+                    const line = event.split('\n').find(item => item.startsWith('data:'));
+                    if (!line) continue;
+                    const data = JSON.parse(line.slice(5).trim());
+                    if (data.type === 'delta') {
+                        answer += data.content || '';
+                        aiTextSpan.textContent = answer;
+                        history.scrollTop = history.scrollHeight;
+                    } else if (data.type === 'error') {
+                        throw new Error(data.message || '流式生成失败');
+                    }
+                }
+                if (done) break;
             }
             history.scrollTop = history.scrollHeight;
 
@@ -1672,13 +1788,21 @@
             console.error('Chat Error:', error);
             const thinkNodes = history.querySelectorAll('.thinking-msg');
             thinkNodes.forEach(node => node.remove());
-            const errorMsg = document.createElement('div');
-            errorMsg.className = 'flex items-start mb-2';
-            const detail = error instanceof TypeError
-                ? `AI 服务未启动或不可达，请确认 Agent 正在运行：${AGENT_BASE}`
-                : error.message;
-            errorMsg.innerHTML = `<i class="fas fa-robot text-red-500 mt-1 mr-2"></i><span class="bg-red-50 text-red-600 px-3 py-2 rounded-lg rounded-tl-none inline-block">抱歉，无法连接到 AI 引擎: ${detail}</span>`;
-            history.appendChild(errorMsg);
+            if (error.name === 'AbortError') {
+                showToast('已停止生成');
+            } else {
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'flex items-start mb-2';
+                const detail = error instanceof TypeError
+                    ? `AI 服务未启动或不可达，请确认 Agent 正在运行：${AGENT_BASE}`
+                    : error.message;
+                errorMsg.innerHTML = `<i class="fas fa-robot text-red-500 mt-1 mr-2"></i><span class="bg-red-50 text-red-600 px-3 py-2 rounded-lg rounded-tl-none inline-block"></span>`;
+                errorMsg.querySelector('span').textContent = `抱歉，无法连接到 AI 引擎: ${detail}`;
+                history.appendChild(errorMsg);
+            }
+        } finally {
+            chatAbortController = null;
+            setChatGenerating(false);
         }
     }
 

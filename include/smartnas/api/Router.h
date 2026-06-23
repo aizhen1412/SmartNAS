@@ -27,6 +27,8 @@ namespace smartnas
             static void handle_register(WFHttpTask *task);
             static void handle_login(WFHttpTask *task);
             static void handle_list_files(WFHttpTask *task);
+            static void handle_list_all_files(WFHttpTask *task);
+            static void handle_current_user(WFHttpTask *task);
             static void handle_delete(WFHttpTask *task);
             static void handle_restore(WFHttpTask *task);
             static void handle_purge(WFHttpTask *task);
@@ -34,6 +36,7 @@ namespace smartnas
             static void handle_hash_wasm_script(WFHttpTask *task);
             static void handle_search_files(WFHttpTask *task);
             static void handle_update_file_summary(WFHttpTask *task);
+            static void handle_update_file_tags(WFHttpTask *task);
             static void handle_rename_file(WFHttpTask *task);
             static void handle_move_file(WFHttpTask *task);
             static void handle_folders(WFHttpTask *task);

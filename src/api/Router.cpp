@@ -13,6 +13,7 @@
 #include <map>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
 
 #include <mutex>
 #include <thread>
@@ -56,6 +57,80 @@ namespace
             }
         }
         return escaped;
+    }
+
+    bool is_json_string_array(const std::string &value)
+    {
+        size_t pos = 0;
+        auto skip_space = [&]()
+        {
+            while (pos < value.size() && std::isspace(static_cast<unsigned char>(value[pos])))
+                ++pos;
+        };
+        skip_space();
+        if (pos >= value.size() || value[pos++] != '[')
+            return false;
+        skip_space();
+        if (pos < value.size() && value[pos] == ']')
+        {
+            ++pos;
+            skip_space();
+            return pos == value.size();
+        }
+
+        while (pos < value.size())
+        {
+            if (value[pos++] != '"')
+                return false;
+            bool closed = false;
+            while (pos < value.size())
+            {
+                unsigned char ch = static_cast<unsigned char>(value[pos++]);
+                if (ch == '"')
+                {
+                    closed = true;
+                    break;
+                }
+                if (ch < 0x20)
+                    return false;
+                if (ch != '\\')
+                    continue;
+                if (pos >= value.size())
+                    return false;
+                char escaped = value[pos++];
+                if (escaped == 'u')
+                {
+                    if (pos + 4 > value.size())
+                        return false;
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        if (!std::isxdigit(static_cast<unsigned char>(value[pos++])))
+                            return false;
+                    }
+                }
+                else if (std::string("\"\\/bfnrt").find(escaped) == std::string::npos)
+                {
+                    return false;
+                }
+            }
+            if (!closed)
+                return false;
+            skip_space();
+            if (pos < value.size() && value[pos] == ',')
+            {
+                ++pos;
+                skip_space();
+                continue;
+            }
+            if (pos < value.size() && value[pos] == ']')
+            {
+                ++pos;
+                skip_space();
+                return pos == value.size();
+            }
+            return false;
+        }
+        return false;
     }
 
     std::string get_query_value(const std::string &uri, const std::string &key)
@@ -224,6 +299,14 @@ namespace smartnas
             {
                 handle_list_files(server_task);
             }
+            else if (uri == "/api/v1/files/all" && method == "GET")
+            {
+                handle_list_all_files(server_task);
+            }
+            else if (uri == "/api/v1/me" && method == "GET")
+            {
+                handle_current_user(server_task);
+            }
             else if (uri.rfind("/api/delete", 0) == 0 && method == "POST")
             {
                 handle_delete(server_task);
@@ -271,6 +354,10 @@ namespace smartnas
             else if (uri == "/api/v1/files/summary" && method == "POST")
             {
                 handle_update_file_summary(server_task);
+            }
+            else if (uri == "/api/v1/files/tags" && method == "POST")
+            {
+                handle_update_file_tags(server_task);
             }
             else
             {
@@ -1132,6 +1219,7 @@ namespace smartnas
                 json += "\"rawSize\":" + std::to_string(files[i].file_size) + ",";
                 json += "\"uploadTime\":" + std::to_string(files[i].upload_time) + ",";
                 json += "\"summary\":\"" + escape_json_string(files[i].summary) + "\",";
+                json += "\"tags\":" + (files[i].tags.empty() ? "[]" : files[i].tags) + ",";
                 json += "\"directory\":\"" + escape_json_string(files[i].directory) + "\",";
                 json += "\"deleted\":" + std::to_string(files[i].deleted) + ",";
                 json += "\"deletedTime\":" + std::to_string(files[i].deleted_time);
@@ -1141,6 +1229,49 @@ namespace smartnas
             }
             json += "]}";
 
+            resp->append_output_body(json.c_str(), json.size());
+        }
+
+        void Router::handle_current_user(WFHttpTask *task)
+        {
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(task->get_req());
+            resp->add_header_pair("Content-Type", "application/json; charset=utf-8");
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("{\"error\":\"Authentication required\"}");
+                return;
+            }
+            std::string json = "{\"username\":\"" + escape_json_string(username) + "\"}";
+            resp->append_output_body(json.c_str(), json.size());
+        }
+
+        void Router::handle_list_all_files(WFHttpTask *task)
+        {
+            auto *resp = task->get_resp();
+            std::string username = get_authenticated_user(task->get_req());
+            resp->add_header_pair("Content-Type", "application/json; charset=utf-8");
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("{\"error\":\"Authentication required\"}");
+                return;
+            }
+
+            auto files = db::DatabaseManager::get_instance().get_all_user_files(username, false);
+            std::string json = "{\"files\":[";
+            for (size_t i = 0; i < files.size(); ++i)
+            {
+                if (i)
+                    json += ",";
+                json += "{\"name\":\"" + escape_json_string(files[i].filename) + "\",";
+                json += "\"hash\":\"" + escape_json_string(files[i].file_hash) + "\",";
+                json += "\"summary\":\"" + escape_json_string(files[i].summary) + "\",";
+                json += "\"tags\":" + (files[i].tags.empty() ? "[]" : files[i].tags) + ",";
+                json += "\"directory\":\"" + escape_json_string(files[i].directory) + "\"}";
+            }
+            json += "]}";
             resp->append_output_body(json.c_str(), json.size());
         }
 
@@ -1421,7 +1552,8 @@ namespace smartnas
             {
                 json_result += "  {\n";
                 json_result += "    \"filename\": \"" + escape_json_string(files[i].filename) + "\",\n";
-                json_result += "    \"summary\": \"" + escape_json_string(files[i].summary) + "\"\n";
+                json_result += "    \"summary\": \"" + escape_json_string(files[i].summary) + "\",\n";
+                json_result += "    \"tags\": " + (files[i].tags.empty() ? "[]" : files[i].tags) + "\n";
                 json_result += "  }";
                 if (i < files.size() - 1)
                     json_result += ",";
@@ -1490,6 +1622,59 @@ namespace smartnas
                 return;
             }
 
+            resp->append_output_body("{\"status\":\"success\"}");
+        }
+
+        void Router::handle_update_file_tags(WFHttpTask *task)
+        {
+            auto *req = task->get_req();
+            auto *resp = task->get_resp();
+            resp->add_header_pair("Content-Type", "application/json; charset=utf-8");
+
+            std::string username = get_authenticated_user(req);
+            if (username.empty())
+            {
+                resp->set_status_code("401");
+                resp->append_output_body("{\"error\":\"Authentication required\"}");
+                return;
+            }
+
+            std::string hash;
+            protocol::HttpHeaderCursor cursor(req);
+            std::string h_name, h_value;
+            while (cursor.next(h_name, h_value))
+            {
+                if (h_name == "File-Hash" || h_name == "file-hash")
+                {
+                    hash = h_value;
+                    break;
+                }
+            }
+
+            const void *body = nullptr;
+            size_t size = 0;
+            req->get_parsed_body(&body, &size);
+            std::string tags = body && size ? std::string(static_cast<const char *>(body), size) : "[]";
+            if (hash.empty() || tags.size() > 4096 || !is_json_string_array(tags))
+            {
+                resp->set_status_code("400");
+                resp->append_output_body("{\"error\":\"Missing File-Hash header or invalid tags JSON\"}");
+                return;
+            }
+
+            auto &db = smartnas::db::DatabaseManager::get_instance();
+            if (!db.user_has_file(username, hash))
+            {
+                resp->set_status_code("404");
+                resp->append_output_body("{\"error\":\"File not found or no permission\"}");
+                return;
+            }
+            if (!db.update_file_tags(username, hash, tags))
+            {
+                resp->set_status_code("500");
+                resp->append_output_body("{\"error\":\"Failed to update tags\"}");
+                return;
+            }
             resp->append_output_body("{\"status\":\"success\"}");
         }
 

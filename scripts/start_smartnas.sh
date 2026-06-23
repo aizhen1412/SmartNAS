@@ -6,7 +6,6 @@ cd "$ROOT_DIR"
 
 export SMARTNAS_DEEPSEEK_API_BASE="${SMARTNAS_DEEPSEEK_API_BASE:-https://api.deepseek.com}"
 export SMARTNAS_DEEPSEEK_MODEL="${SMARTNAS_DEEPSEEK_MODEL:-deepseek-chat}"
-export SMARTNAS_MAX_NEW_TOKENS="${SMARTNAS_MAX_NEW_TOKENS:-256}"
 export SMARTNAS_CORE_API="${SMARTNAS_CORE_API:-http://127.0.0.1:8080}"
 
 mkdir -p "$ROOT_DIR/var/data" "$ROOT_DIR/var/db"
