@@ -75,6 +75,7 @@ Core 当前结构已经按 HTTP 领域拆分：
 ```text
 src/api/
 ├── Router.cpp              # 仅路由分发
+├── RouterInternal.h        # API 实现私有声明，不对外暴露
 ├── RouterInternal.cpp      # 查询参数、JSON、安全路径、JWT 常量
 ├── AuthHandlers.cpp
 ├── UploadHandlers.cpp

@@ -28,11 +28,11 @@ int main(int argc, char **argv)
 
     WFHttpServer server(smartnas::api::Router::process);
     const unsigned short port = config.core_port();
-    if (server.start(port) == 0)
+    if (server.start(config.core_host().c_str(), port) == 0)
     {
         std::cout << "=====================================" << std::endl;
         std::cout << "SmartNAS 核心网关已启动!" << std::endl;
-        std::cout << "监听端口: " << port << std::endl;
+        std::cout << "监听地址: " << config.core_host() << ":" << port << std::endl;
         std::cout << "=====================================" << std::endl;
 
         // Block forever instead of getchar() which causes SIGTTIN in background

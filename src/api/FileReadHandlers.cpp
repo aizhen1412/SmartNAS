@@ -16,7 +16,13 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <memory>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 namespace smartnas
 {
@@ -31,7 +37,6 @@ namespace smartnas
 
             // 1. 设置响应头
             resp->add_header_pair("Content-Type", "application/json");
-            resp->add_header_pair("Access-Control-Allow-Origin", "*");
 
             // 2. 获取当前用户
             std::string username = get_authenticated_user(req);
@@ -234,16 +239,18 @@ namespace smartnas
             auto *resp = task->get_resp();
             std::string filename = hash + ".bin";
 
-            size_t total_size = smartnas::core::FileManager::get_file_size(filename);
-            if (total_size <= 0)
+            const std::filesystem::path file_path = smartnas::config::AppConfig::get_instance().data_path(filename);
+            std::error_code fs_error;
+            if (!std::filesystem::exists(file_path, fs_error) || fs_error)
             {
                 resp->set_status_code("404");
                 resp->append_output_body("File not found.");
                 return;
             }
+            size_t total_size = smartnas::core::FileManager::get_file_size(filename);
 
             size_t start = 0;
-            size_t end = total_size - 1;
+            size_t end = total_size == 0 ? 0 : total_size - 1;
             bool client_requested_range = false;
 
             // 1. 稳健解析 Range 头
@@ -276,19 +283,19 @@ namespace smartnas
             }
 
             // 范围合法性检查
-            if (start > end || start >= total_size)
+            if (total_size > 0 && (start > end || start >= total_size))
             {
                 resp->set_status_code("416");
                 resp->add_header_pair("Content-Range", "bytes */" + std::to_string(total_size));
                 return;
             }
-            if (end >= total_size)
+            if (total_size > 0 && end >= total_size)
                 end = total_size - 1;
 
             // 2. 内存安全处理
             // 只有在浏览器支持断点续传（发了 Range 头）或者文件确实巨大时才截断
             size_t MAX_CHUNK = 8 * 1024 * 1024; // 建议 8MB，兼顾性能和内存
-            size_t content_length = end - start + 1;
+            size_t content_length = total_size == 0 ? 0 : end - start + 1;
 
             // 只有当是分块请求，或者不是下载（比如视频预览）并且确实需要限制的时候，才截断
             // 注意：对于图片预览或正常下载，不要截断
@@ -306,8 +313,44 @@ namespace smartnas
                 end = start + content_length - 1;
             }
 
-            std::string real_path = smartnas::config::AppConfig::get_instance().data_path(filename).string();
-            auto buf = std::shared_ptr<char[]>(new char[content_length]);
+            std::shared_ptr<void> mapping;
+            const char *mapped_body = nullptr;
+            if (content_length > 0)
+            {
+                const long page_size = sysconf(_SC_PAGESIZE);
+                if (page_size <= 0)
+                {
+                    resp->set_status_code("500");
+                    resp->append_output_body("Server mmap page size error.");
+                    return;
+                }
+                const size_t page_offset = start % static_cast<size_t>(page_size);
+                const size_t map_offset = start - page_offset;
+                const size_t map_length = content_length + page_offset;
+
+                int fd = open(file_path.c_str(), O_RDONLY);
+                if (fd < 0)
+                {
+                    resp->set_status_code("500");
+                    resp->append_output_body("Server file open error.");
+                    return;
+                }
+                void *mapped = mmap(nullptr, map_length, PROT_READ, MAP_PRIVATE, fd, map_offset);
+                close(fd);
+                if (mapped == MAP_FAILED)
+                {
+                    resp->set_status_code("500");
+                    resp->append_output_body("Server mmap error.");
+                    return;
+                }
+
+                mapping = std::shared_ptr<void>(mapped, [map_length](void *addr)
+                {
+                    if (addr && addr != MAP_FAILED)
+                        munmap(addr, map_length);
+                });
+                mapped_body = static_cast<const char *>(mapping.get()) + page_offset;
+            }
 
             // --- 核心修复 A：准确设置 Content-Type ---
             std::string content_type = "application/octet-stream";
@@ -360,33 +403,14 @@ namespace smartnas
             disposition += "; filename=\"" + encoded_name + "\"";
             resp->add_header_pair("Content-Disposition", disposition);
 
-            // --- 核心修复 D：Workflow 异步 I/O 与零拷贝缓冲区下发 ---
-            auto *pread_task = WFTaskFactory::create_pread_task(real_path, buf.get(), content_length, start,
-                                                                [task, buf](WFFileIOTask *io_task)
-                                                                {
-                                                                    long ret = io_task->get_retval();
-                                                                    if (ret >= 0)
-                                                                    {
-                                                                        // zero-copy! 我们不动 buffer，直接让底层发这个地址的内容！
-                                                                        task->get_resp()->append_output_body_nocopy(buf.get(), ret);
-                                                                    }
-                                                                    else
-                                                                    {
-                                                                        // 异步读取时发现文件损坏或不存在
-                                                                        task->get_resp()->set_status_code("500");
-                                                                        task->get_resp()->append_output_body("Server I/O Error.");
-                                                                    }
-                                                                });
+            if (req->get_method() == std::string("HEAD"))
+                return;
 
-            // 绑定生命周期：让 buf 活到 task 发送完毕彻底析构的那一刻
-            task->set_callback([buf](WFHttpTask *)
-                               {
-                                   // Lambda 捕获着 buf 的 scoped pointer，在请求完成后自动被释放
-                               });
-
-            // 将磁盘读取任务挂载到当前任务列
-            // Router::process 执行完毕并不会立即回复客户端，而是等此 Series 走完才会回复！
-            series_of(task)->push_back(pread_task);
+            if (mapped_body)
+            {
+                resp->append_output_body_nocopy(mapped_body, content_length);
+                task->set_callback([mapping](WFHttpTask *) {});
+            }
         }
 
     } // namespace api

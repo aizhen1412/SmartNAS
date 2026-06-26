@@ -120,7 +120,8 @@
             try {
                 const response = await fetch(`${API_BASE}/login`, {
                     method: 'POST',
-                    headers: { 'User': user, 'Password': pwd }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, password: pwd })
                 });
                 if (response.ok) {
                     localStorage.setItem('username', user); // 核心：保存登录态
@@ -148,7 +149,8 @@
             try {
                 const response = await fetch(`${API_BASE}/register`, {
                     method: 'POST',
-                    headers: { 'User': user, 'Password': pwd }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, password: pwd })
                 });
                 const msg = await response.text();
                 closeModal('registerModal');

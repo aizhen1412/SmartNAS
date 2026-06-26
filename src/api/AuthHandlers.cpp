@@ -16,6 +16,55 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <regex>
+
+namespace
+{
+    std::string json_string_field(const std::string &body, const std::string &key)
+    {
+        const std::regex pattern("\"" + key + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+        std::smatch match;
+        if (!std::regex_search(body, match, pattern))
+            return "";
+        std::string value = match[1].str();
+        std::string out;
+        out.reserve(value.size());
+        for (size_t i = 0; i < value.size(); ++i)
+        {
+            if (value[i] == '\\' && i + 1 < value.size())
+            {
+                const char escaped = value[++i];
+                if (escaped == 'n')
+                    out.push_back('\n');
+                else if (escaped == 'r')
+                    out.push_back('\r');
+                else if (escaped == 't')
+                    out.push_back('\t');
+                else
+                    out.push_back(escaped);
+            }
+            else
+            {
+                out.push_back(value[i]);
+            }
+        }
+        return out;
+    }
+
+    void fill_credentials_from_body(protocol::HttpRequest *req, std::string &user, std::string &pwd)
+    {
+        const void *body = nullptr;
+        size_t size = 0;
+        req->get_parsed_body(&body, &size);
+        if (!body || size == 0)
+            return;
+        const std::string payload(static_cast<const char *>(body), size);
+        if (user.empty())
+            user = json_string_field(payload, "user");
+        if (pwd.empty())
+            pwd = json_string_field(payload, "password");
+    }
+}
 
 namespace smartnas
 {
@@ -47,9 +96,9 @@ namespace smartnas
                     pwd = h_value;
                 }
             }
+            fill_credentials_from_body(req, user, pwd);
 
-            // 打印一下，看看我们抠出来的变量对不对
-            std::cout << "[Final Check] User: " << user << ", Pwd: " << pwd << std::endl;
+            std::cout << "[Register Attempt] User: " << user << std::endl;
 
             // 判断逻辑
             if (user.empty() || pwd.empty())
@@ -97,9 +146,9 @@ namespace smartnas
                     pwd = h_value;
                 }
             }
+            fill_credentials_from_body(req, user, pwd);
 
-            // 调试打印：让你在服务器终端能看到登录尝试
-            std::cout << "[Login Attempt] User: " << user << ", Pwd: " << pwd << std::endl;
+            std::cout << "[Login Attempt] User: " << user << std::endl;
 
             if (user.empty() || pwd.empty())
             {
@@ -119,7 +168,7 @@ namespace smartnas
                                  .sign(jwt::algorithm::hs256{jwt_secret()});
 
                 resp->set_status_code("200");
-                std::string json_resp = "{\"status\": \"success\", \"token\": \"" + token + "\", \"message\": \"Login Success! Welcome, " + user + "\"}";
+                std::string json_resp = "{\"status\": \"success\", \"token\": \"" + token + "\", \"message\": \"Login Success! Welcome, " + escape_json_string(user) + "\"}";
                 resp->add_header_pair("Content-Type", "application/json; charset=utf-8");
                 resp->append_output_body(json_resp.c_str(), json_resp.size());
             }

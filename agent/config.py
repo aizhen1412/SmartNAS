@@ -24,9 +24,9 @@ def _path(key: str, env: str, default: str) -> Path:
     return value if value.is_absolute() else PROJECT_ROOT / value
 
 
-CORE_HOST = _value("core_host", "SMARTNAS_CORE_HOST", "0.0.0.0")
+CORE_HOST = _value("core_host", "SMARTNAS_CORE_HOST", "127.0.0.1")
 CORE_PORT = _value("core_port", "SMARTNAS_CORE_PORT", 8080, int)
-AGENT_HOST = _value("agent_host", "SMARTNAS_AGENT_HOST", "0.0.0.0")
+AGENT_HOST = _value("agent_host", "SMARTNAS_AGENT_HOST", "127.0.0.1")
 AGENT_PORT = _value("agent_port", "SMARTNAS_AGENT_PORT", 8081, int)
 NAS_CORE_API = _value("core_api", "SMARTNAS_CORE_API", f"http://127.0.0.1:{CORE_PORT}")
 
@@ -55,5 +55,4 @@ RAG_MIN_SCORE = _value("rag_min_score", "SMARTNAS_RAG_MIN_SCORE", 0.28, float)
 AUDIT_LOG_PATH = _path("audit_log_path", "SMARTNAS_AUDIT_LOG", "var/log/agent_audit.jsonl")
 AUDIT_LOG_MAX_BYTES = _value("audit_log_max_bytes", "SMARTNAS_AUDIT_LOG_MAX_BYTES", 20 * 1024 * 1024, int)
 AUDIT_LOG_BACKUPS = _value("audit_log_backups", "SMARTNAS_AUDIT_LOG_BACKUPS", 10, int)
-AUDIT_LOG_FULL_CONTENT = _value("audit_log_full_content", "SMARTNAS_AUDIT_LOG_FULL_CONTENT", True, bool)
-
+AUDIT_LOG_FULL_CONTENT = _value("audit_log_full_content", "SMARTNAS_AUDIT_LOG_FULL_CONTENT", False, bool)

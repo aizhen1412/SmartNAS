@@ -23,6 +23,10 @@ namespace smartnas
             if (sqlite3_open(db_path.c_str(), &db_) != SQLITE_OK)
                 return false;
 
+            sqlite3_busy_timeout(db_, 5000);
+            sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+            sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
+
             // 创建用户表和文件表
             const char *sql =
                 "CREATE TABLE IF NOT EXISTS users ("
@@ -56,7 +60,18 @@ namespace smartnas
                 "file_hash TEXT,"
                 "owner TEXT,"
                 "expires_at INTEGER,"
-                "created_time INTEGER);";
+                "created_time INTEGER);"
+
+                "CREATE INDEX IF NOT EXISTS idx_files_owner_directory_deleted "
+                "ON files(owner, directory, deleted);"
+                "CREATE INDEX IF NOT EXISTS idx_files_owner_hash_deleted "
+                "ON files(owner, file_hash, deleted);"
+                "CREATE INDEX IF NOT EXISTS idx_files_owner_deleted_time "
+                "ON files(owner, deleted, upload_time DESC);"
+                "CREATE INDEX IF NOT EXISTS idx_files_hash "
+                "ON files(file_hash);"
+                "CREATE INDEX IF NOT EXISTS idx_shares_owner_hash "
+                "ON shares(owner, file_hash);";
             char *errMsg = nullptr;
             if (sqlite3_exec(db_, sql, nullptr, nullptr, &errMsg) != SQLITE_OK)
             {

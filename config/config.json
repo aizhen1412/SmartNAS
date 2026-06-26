@@ -1,13 +1,13 @@
 {
-  "core_host": "0.0.0.0",
+  "core_host": "127.0.0.1",
   "core_port": 8080,
-  "agent_host": "0.0.0.0",
+  "agent_host": "127.0.0.1",
   "agent_port": 8081,
   "core_api": "http://127.0.0.1:8080",
   "database_path": "var/db/smartnas.db",
   "data_dir": "var/data",
   "web_dir": "web",
-  "jwt_secret": "SMARTNAS_SECRET_KEY_2026_!@#",
+  "jwt_secret": "",
 
   "upload_chunk_size": 8388608,
   "upload_concurrency": 4,
@@ -36,6 +36,6 @@
   "audit_log_path": "var/log/agent_audit.jsonl",
   "audit_log_max_bytes": 20971520,
   "audit_log_backups": 10,
-  "audit_log_full_content": true,
+  "audit_log_full_content": false,
   "summary_worker_count": 1
 }

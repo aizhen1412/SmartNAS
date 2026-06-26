@@ -66,8 +66,8 @@ Agent 默认通过 `http://127.0.0.1:8080` 访问 Core。
 | `SMARTNAS_AUDIT_LOG` | `var/log/agent_audit.jsonl` | 审计日志路径 |
 | `SMARTNAS_AUDIT_LOG_MAX_BYTES` | `20971520` | 单个审计日志最大字节数 |
 | `SMARTNAS_AUDIT_LOG_BACKUPS` | `10` | 审计日志保留数量 |
-| `SMARTNAS_AUDIT_LOG_FULL_CONTENT` | `1` | 是否记录完整内容 |
-| `SMARTNAS_AGENT_HOST` | `0.0.0.0` | Agent 监听地址 |
+| `SMARTNAS_AUDIT_LOG_FULL_CONTENT` | `0` | 是否记录完整内容 |
+| `SMARTNAS_AGENT_HOST` | `127.0.0.1` | Agent 监听地址 |
 | `SMARTNAS_AGENT_PORT` | `8081` | Agent 监听端口 |
 | `SMARTNAS_SUMMARY_WORKER_COUNT` | `1` | 摘要后台 worker 数 |
 

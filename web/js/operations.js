@@ -1,13 +1,38 @@
-        function downloadByHash(hash) {
+        async function openAuthedBlob(path, filenameHint, target = "_blank") {
             const token = getAuthToken();
             if (!token) { showToast("请先登录", true); return; }
-            window.open(`${API_BASE}/download?hash=${hash}&token=${token}`);
+            const response = await fetch(path, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!response.ok) {
+                throw new Error(`请求失败 (${response.status})`);
+            }
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const win = window.open(objectUrl, target);
+            if (!win) {
+                const link = document.createElement('a');
+                link.href = objectUrl;
+                link.download = filenameHint || 'download';
+                link.click();
+            }
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
         }
 
-        function previewByHash(hash) {
-            const token = getAuthToken();
-            if (!token) { showToast("请先登录", true); return; }
-            window.open(`${API_BASE}/api/preview?hash=${hash}&token=${token}`, "_blank");
+        async function downloadByHash(hash) {
+            try {
+                await openAuthedBlob(`${API_BASE}/download?hash=${encodeURIComponent(hash)}`, 'download', "_blank");
+            } catch (error) {
+                showToast(`下载失败：${error.message}`, true);
+            }
+        }
+
+        async function previewByHash(hash) {
+            try {
+                await openAuthedBlob(`${API_BASE}/api/preview?hash=${encodeURIComponent(hash)}`, 'preview', "_blank");
+            } catch (error) {
+                showToast(`预览失败：${error.message}`, true);
+            }
         }
 
         async function startSummarizeByHash(hash, options = {}) {

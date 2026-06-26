@@ -3,7 +3,18 @@
 #include "workflow/HttpUtil.h"
 #include <jwt-cpp/jwt.h>
 #include <iostream>
+#include <regex>
 #include <string>
+
+namespace
+{
+    bool is_allowed_origin(const std::string &origin)
+    {
+        static const std::regex allowed(
+            R"(^https?://(localhost|127\.0\.0\.1|\[::1\]|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$)");
+        return std::regex_match(origin, allowed);
+    }
+}
 
 namespace smartnas
 {
@@ -27,22 +38,6 @@ namespace smartnas
                         token = h_value.substr(7);
                     }
                     break;
-                }
-            }
-
-            // 2. 如果 Header 里没有，尝试从 URI query parameter 里取 ?token=...
-            if (token.empty())
-            {
-                std::string uri = req->get_request_uri();
-                size_t token_pos = uri.find("token=");
-                if (token_pos != std::string::npos)
-                {
-                    token = uri.substr(token_pos + 6);
-                    size_t amp_pos = token.find("&");
-                    if (amp_pos != std::string::npos)
-                    {
-                        token = token.substr(0, amp_pos);
-                    }
                 }
             }
 
@@ -73,13 +68,23 @@ namespace smartnas
             auto *req = server_task->get_req();
             auto *resp = server_task->get_resp();
 
-            // --- 【全局 CORS 处理开始】 ---
-            // 无论什么请求，先给它加上这个头
-            resp->add_header_pair("Access-Control-Allow-Origin", "*");
+            protocol::HttpHeaderCursor cors_cursor(req);
+            std::string cors_name, cors_value, origin;
+            while (cors_cursor.next(cors_name, cors_value))
+            {
+                if (cors_name == "Origin" || cors_name == "origin")
+                {
+                    origin = cors_value;
+                    break;
+                }
+            }
+            if (!origin.empty() && is_allowed_origin(origin))
+            {
+                resp->add_header_pair("Access-Control-Allow-Origin", origin);
+                resp->add_header_pair("Vary", "Origin");
+            }
             resp->add_header_pair("Access-Control-Allow-Headers", "Authorization, Content-Type, User, Password, File-Name, File-Hash, Chunk-Index, Total-Chunks, File-Size");
-            // 允许的请求方法
-            resp->add_header_pair("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            // 如果是浏览器的预检请求，直接返回 200，不需要走后面的逻辑
+            resp->add_header_pair("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS");
             std::string method = req->get_method();
             if (method == "OPTIONS")
             {
@@ -126,7 +131,7 @@ namespace smartnas
             {
                 handle_upload_merge(server_task);
             }
-            else if (uri.rfind("/download", 0) == 0 && method == "GET")
+            else if (uri.rfind("/download", 0) == 0 && (method == "GET" || method == "HEAD"))
             {
                 handle_download(server_task);
             }

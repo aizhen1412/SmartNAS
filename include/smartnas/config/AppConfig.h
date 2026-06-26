@@ -33,9 +33,9 @@ namespace smartnas::config
         std::size_t upload_chunk_size_ = 8 * 1024 * 1024;
         unsigned int upload_concurrency_ = 4;
         std::size_t web_crypto_limit_ = 256 * 1024 * 1024;
-        std::string core_host_ = "0.0.0.0";
-        std::string agent_host_ = "0.0.0.0";
-        std::string jwt_secret_ = "SMARTNAS_SECRET_KEY_2026_!@#";
+        std::string core_host_ = "127.0.0.1";
+        std::string agent_host_ = "127.0.0.1";
+        std::string jwt_secret_;
         std::filesystem::path database_path_ = "var/db/smartnas.db";
         std::filesystem::path data_dir_ = "var/data";
         std::filesystem::path web_dir_ = "web";

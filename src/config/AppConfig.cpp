@@ -1,6 +1,9 @@
 #include "smartnas/config/AppConfig.h"
 
 #include <fstream>
+#include <cstdlib>
+#include <iostream>
+#include <openssl/rand.h>
 #include <regex>
 #include <sstream>
 
@@ -18,6 +21,28 @@ namespace
         const std::regex pattern("\\\"" + key + "\\\"\\s*:\\s*([0-9]+)");
         std::smatch match;
         return std::regex_search(json, match, pattern) ? std::stoi(match[1].str()) : fallback;
+    }
+
+    std::string env_value(const char *name)
+    {
+        const char *value = std::getenv(name);
+        return value ? value : "";
+    }
+
+    std::string random_secret()
+    {
+        unsigned char bytes[32];
+        if (RAND_bytes(bytes, sizeof(bytes)) != 1)
+            return "";
+        static const char *hex = "0123456789abcdef";
+        std::string result;
+        result.reserve(sizeof(bytes) * 2);
+        for (unsigned char byte : bytes)
+        {
+            result.push_back(hex[byte >> 4]);
+            result.push_back(hex[byte & 0x0f]);
+        }
+        return result;
     }
 }
 
@@ -50,7 +75,14 @@ namespace smartnas::config
 
         core_host_ = string_value(json, "core_host", core_host_);
         agent_host_ = string_value(json, "agent_host", agent_host_);
-        jwt_secret_ = string_value(json, "jwt_secret", jwt_secret_);
+        jwt_secret_ = env_value("SMARTNAS_JWT_SECRET");
+        if (jwt_secret_.empty())
+            jwt_secret_ = string_value(json, "jwt_secret", jwt_secret_);
+        if (jwt_secret_.empty() || jwt_secret_ == "SMARTNAS_SECRET_KEY_2026_!@#")
+        {
+            jwt_secret_ = random_secret();
+            std::cerr << "[Config] SMARTNAS_JWT_SECRET 未配置，已生成临时 JWT secret；重启后旧 token 会失效。" << std::endl;
+        }
         core_port_ = static_cast<unsigned short>(int_value(json, "core_port", core_port_));
         agent_port_ = static_cast<unsigned short>(int_value(json, "agent_port", agent_port_));
         upload_chunk_size_ = static_cast<std::size_t>(int_value(json, "upload_chunk_size", upload_chunk_size_));
@@ -60,7 +92,7 @@ namespace smartnas::config
         data_dir_ = resolve(string_value(json, "data_dir", data_dir_.string()));
         web_dir_ = resolve(string_value(json, "web_dir", web_dir_.string()));
         return core_port_ > 0 && agent_port_ > 0 && upload_chunk_size_ > 0 &&
-               upload_concurrency_ > 0 && !jwt_secret_.empty();
+               upload_concurrency_ > 0 && jwt_secret_.size() >= 32;
     }
 
     std::filesystem::path AppConfig::data_path(const std::string &name) const

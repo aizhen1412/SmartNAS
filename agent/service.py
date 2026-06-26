@@ -97,7 +97,7 @@ app = FastAPI(title="SmartNAS Agent Service")
 # 添加 CORS 支持，允许所有来源跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,6 +107,9 @@ embedding_model = None
 markitdown_converter = None
 embedding_generation_lock = threading.Lock()
 vector_store_lock = threading.Lock()
+vector_reconcile_cache: Dict[str, Dict[str, Any]] = {}
+vector_reconcile_cache_lock = threading.Lock()
+VECTOR_RECONCILE_TTL_SECONDS = 30
 summary_executor = ThreadPoolExecutor(max_workers=SUMMARY_WORKER_COUNT)
 summary_tasks: Dict[str, Dict[str, Any]] = {}
 summary_tasks_lock = threading.Lock()
@@ -440,6 +443,12 @@ def rag_has_file_index(token: str, file_hash: str) -> bool:
 
 def reconcile_vector_store(token: str) -> Dict[str, int]:
     owner = get_user_identity(token)
+    now = time.time()
+    with vector_reconcile_cache_lock:
+        cached = vector_reconcile_cache.get(owner)
+        if cached and now - cached.get("checked_at", 0) < VECTOR_RECONCILE_TTL_SECONDS:
+            return cached["result"]
+
     files = fetch_all_user_files(token)
     active = {item.get("hash"): item.get("name", "") for item in files if item.get("hash")}
     with vector_store_lock:
@@ -460,6 +469,8 @@ def reconcile_vector_store(token: str) -> Dict[str, int]:
         if removed or renamed:
             save_vector_chunks(token, kept)
     result = {"active_files": len(active), "removed_chunks": removed, "renamed_chunks": renamed}
+    with vector_reconcile_cache_lock:
+        vector_reconcile_cache[owner] = {"checked_at": now, "result": result}
     audit_event(owner, "index_reconcile", "success", result=result)
     return result
 
@@ -752,9 +763,9 @@ def markdown_cache_path(file_hash: str) -> Path:
     safe_hash = re.sub(r"[^a-zA-Z0-9_.-]", "_", file_hash)
     return CACHE_DIR / f"{safe_hash}.v{CACHE_FORMAT_VERSION}.md"
 
-def download_file_for_summary(file_hash: str, token: str):
+def fetch_file_metadata_for_summary(file_hash: str, token: str):
     try:
-        download = requests.get(
+        response = requests.head(
             f"{NAS_CORE_API}/download",
             params={"hash": file_hash},
             headers={"Authorization": token},
@@ -763,19 +774,60 @@ def download_file_for_summary(file_hash: str, token: str):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"无法连接核心下载接口: {exc}")
 
+    try:
+        if response.status_code == 403:
+            raise HTTPException(status_code=403, detail="没有权限读取该文件")
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=f"核心下载接口返回 {response.status_code}")
+
+        filename = filename_from_content_disposition(response.headers.get("Content-Disposition", ""))
+        suffix = Path(filename).suffix.lower()
+        if suffix not in SUPPORTED_SUMMARY_EXTENSIONS:
+            raise HTTPException(status_code=415, detail=f"暂不支持该文件类型: {suffix or 'unknown'}")
+        return filename, suffix
+    finally:
+        response.close()
+
+def download_file_for_summary(file_hash: str, token: str, filename: Optional[str] = None, suffix: Optional[str] = None):
+    if filename is None or suffix is None:
+        filename, suffix = fetch_file_metadata_for_summary(file_hash, token)
+    try:
+        download = requests.get(
+            f"{NAS_CORE_API}/download",
+            params={"hash": file_hash},
+            headers={"Authorization": token},
+            timeout=60,
+            stream=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"无法连接核心下载接口: {exc}")
+
     if download.status_code == 403:
+        download.close()
         raise HTTPException(status_code=403, detail="没有权限读取该文件")
     if download.status_code == 404:
+        download.close()
         raise HTTPException(status_code=404, detail="文件不存在")
     if download.status_code != 200:
+        download.close()
         raise HTTPException(status_code=download.status_code, detail=f"核心下载接口返回 {download.status_code}")
 
-    filename = filename_from_content_disposition(download.headers.get("Content-Disposition", ""))
-    suffix = Path(filename).suffix.lower()
-    if suffix not in SUPPORTED_SUMMARY_EXTENSIONS:
-        raise HTTPException(status_code=415, detail=f"暂不支持该文件类型: {suffix or 'unknown'}")
+    temp_file = tempfile.NamedTemporaryFile(prefix="smartnas_", suffix=suffix, delete=False)
+    temp_path = Path(temp_file.name)
+    try:
+        with temp_file:
+            for chunk in download.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    temp_file.write(chunk)
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f"核心下载流读取失败: {exc}")
+    finally:
+        download.close()
 
-    return filename, suffix, download.content
+    return filename, suffix, temp_path
 
 def image_to_markdown(filename: str, content: bytes) -> str:
     with Image.open(io.BytesIO(content)) as image:
@@ -847,39 +899,40 @@ def fallback_markdown(filename: str, suffix: str, content: bytes) -> str:
 
 def convert_file_to_markdown(file_hash: str, token: str, force: bool = False):
     cache_path = markdown_cache_path(file_hash)
-    filename, suffix, content = download_file_for_summary(file_hash, token)
-
+    filename, suffix = fetch_file_metadata_for_summary(file_hash, token)
     if cache_path.exists() and not force:
         return filename, cache_path.read_text(encoding="utf-8"), True
 
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    markdown_text = ""
+    filename, suffix, temp_path = download_file_for_summary(file_hash, token, filename, suffix)
 
     try:
-        if suffix in IMAGE_EXTENSIONS:
-            markdown_text = fallback_markdown(filename, suffix, content)
-        else:
-            converter = get_markitdown_converter()
-            with tempfile.NamedTemporaryFile(prefix="smartnas_", suffix=suffix, delete=True) as tmp:
-                tmp.write(content)
-                tmp.flush()
-                try:
-                    converted = converter.convert_local(tmp.name)
-                except AttributeError:
-                    converted = converter.convert(tmp.name)
-                markdown_text = converted.text_content
-    except Exception as exc:
-        if suffix not in IMAGE_EXTENSIONS and suffix not in TEXT_LIKE_EXTENSIONS and suffix not in MEDIA_EXTENSIONS:
-            raise HTTPException(status_code=422, detail=f"MarkItDown 转换失败: {exc}")
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        markdown_text = ""
 
-    if not markdown_text.strip():
         try:
-            markdown_text = fallback_markdown(filename, suffix, content)
+            if suffix in IMAGE_EXTENSIONS:
+                markdown_text = fallback_markdown(filename, suffix, temp_path.read_bytes())
+            else:
+                converter = get_markitdown_converter()
+                try:
+                    converted = converter.convert_local(str(temp_path))
+                except AttributeError:
+                    converted = converter.convert(str(temp_path))
+                markdown_text = converted.text_content
         except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"文件转换失败: {exc}")
+            if suffix not in IMAGE_EXTENSIONS and suffix not in TEXT_LIKE_EXTENSIONS and suffix not in MEDIA_EXTENSIONS:
+                raise HTTPException(status_code=422, detail=f"MarkItDown 转换失败: {exc}")
 
-    cache_path.write_text(markdown_text, encoding="utf-8")
-    return filename, markdown_text, False
+        if not markdown_text.strip():
+            try:
+                markdown_text = fallback_markdown(filename, suffix, temp_path.read_bytes())
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail=f"文件转换失败: {exc}")
+
+        cache_path.write_text(markdown_text, encoding="utf-8")
+        return filename, markdown_text, False
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 def update_core_summary(file_hash: str, token: str, summary: str):
     try:
@@ -1547,4 +1600,3 @@ async def clear_history(authorization: Optional[str] = Header(None)):
     sessions.pop(owner, None)
     audit_event(owner, "clear_history", "success")
     return {"status": "success"}
-

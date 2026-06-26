@@ -5,6 +5,8 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <openssl/rand.h>
+#include <sstream>
 #include <string>
 
 namespace smartnas::api::detail
@@ -160,8 +162,21 @@ namespace smartnas::api::detail
 
     std::string random_token()
     {
-        auto now = std::chrono::system_clock::now().time_since_epoch().count();
-        std::string seed = std::to_string(now) + std::to_string(std::rand());
-        return smartnas::utils::HashUtil::sha256(seed.c_str(), seed.size()).substr(0, 32);
+        unsigned char bytes[24];
+        if (RAND_bytes(bytes, sizeof(bytes)) != 1)
+        {
+            auto now = std::chrono::system_clock::now().time_since_epoch().count();
+            std::string seed = std::to_string(now) + std::to_string(std::rand());
+            return smartnas::utils::HashUtil::sha256(seed.c_str(), seed.size()).substr(0, 32);
+        }
+        static const char *hex = "0123456789abcdef";
+        std::string token;
+        token.reserve(sizeof(bytes) * 2);
+        for (unsigned char byte : bytes)
+        {
+            token.push_back(hex[byte >> 4]);
+            token.push_back(hex[byte & 0x0f]);
+        }
+        return token;
     }
 }

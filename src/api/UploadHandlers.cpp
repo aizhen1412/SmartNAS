@@ -17,6 +17,41 @@
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
+
+namespace
+{
+    struct UploadSession
+    {
+        int total_chunks = 0;
+        long long file_size = -1;
+        long long chunk_size = -1;
+    };
+
+    std::mutex upload_sessions_mutex;
+    std::unordered_map<std::string, UploadSession> upload_sessions;
+
+    std::string upload_session_key(const std::string &username, const std::string &hash)
+    {
+        return username + ":" + hash;
+    }
+
+    std::string chunk_storage_id(const std::string &username, const std::string &hash)
+    {
+        const std::string seed = username + "\n" + hash;
+        return smartnas::utils::HashUtil::sha256(seed.c_str(), seed.size());
+    }
+
+    std::string lower_header(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch)
+        {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return value;
+    }
+}
 
 namespace smartnas
 {
@@ -103,6 +138,8 @@ namespace smartnas
                 // 但在数据库里记录它的“真名”
                 meta.storage_path = smartnas::config::AppConfig::get_instance().data_path(file_hash + ".bin").string();
                 meta.upload_time = std::chrono::system_clock::now().time_since_epoch().count();
+                meta.owner = username;
+                meta.directory = directory;
                 // 摘要由外部服务通过独立 API 写入，上传路径不依赖额外服务。
                 meta.summary = "";
                 db.save_file_metadata(meta);
@@ -111,7 +148,6 @@ namespace smartnas
             // 4. 返回响应
             std::string res_json = "{\"status\":\"success\",\"message\":\"" + status_msg + "\",\"hash\":\"" + file_hash + "\"}";
             resp->add_header_pair("Content-Type", "application/json");
-            resp->add_header_pair("Access-Control-Allow-Origin", "*"); // 记得加跨域
             resp->append_output_body(res_json.c_str(), res_json.size());
         }
 
@@ -204,11 +240,16 @@ namespace smartnas
             }
             else
             {
+                {
+                    std::lock_guard<std::mutex> lock(upload_sessions_mutex);
+                    upload_sessions[upload_session_key(username, hash_str)] = UploadSession{total_chunks, file_size, chunk_size};
+                }
+                const std::string temp_id = chunk_storage_id(username, hash_str);
                 std::string missing = "{\"status\":\"missing\",\"missing\":[";
                 bool first = true;
                 for (int i = 0; i < total_chunks; ++i)
                 {
-                    bool present = core::FileManager::chunk_exists(hash_str, i);
+                    bool present = core::FileManager::chunk_exists(temp_id, i);
                     if (present && file_size >= 0 && chunk_size > 0)
                     {
                         const long long offset = static_cast<long long>(i) * chunk_size;
@@ -217,7 +258,7 @@ namespace smartnas
                         else
                         {
                             const size_t expected_chunk_size = static_cast<size_t>(std::min(chunk_size, file_size - offset));
-                            present = core::FileManager::chunk_has_size(hash_str, i, expected_chunk_size);
+                            present = core::FileManager::chunk_has_size(temp_id, i, expected_chunk_size);
                         }
                     }
                     if (!present)
@@ -249,9 +290,10 @@ namespace smartnas
             std::string h_name, h_value, hash, index_str;
             while (cursor.next(h_name, h_value))
             {
-                if (h_name == "File-Hash")
+                h_name = lower_header(h_name);
+                if (h_name == "file-hash")
                     hash = h_value;
-                if (h_name == "Chunk-Index")
+                if (h_name == "chunk-index")
                     index_str = h_value;
             }
             const void *body;
@@ -273,7 +315,42 @@ namespace smartnas
                     return;
                 }
 
-                if (chunk_index < 0 || !core::FileManager::save_chunk(hash, chunk_index, body, size))
+                UploadSession session;
+                {
+                    std::lock_guard<std::mutex> lock(upload_sessions_mutex);
+                    auto found = upload_sessions.find(upload_session_key(username, hash));
+                    if (found == upload_sessions.end())
+                    {
+                        resp->set_status_code("409");
+                        resp->append_output_body("{\"error\":\"Upload session not initialized\"}");
+                        resp->add_header_pair("Content-Type", "application/json");
+                        return;
+                    }
+                    session = found->second;
+                }
+
+                if (chunk_index < 0 || chunk_index >= session.total_chunks)
+                {
+                    resp->set_status_code("400");
+                    resp->append_output_body("{\"error\":\"Chunk index out of range\"}");
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
+                if (session.file_size >= 0 && session.chunk_size > 0)
+                {
+                    const long long offset = static_cast<long long>(chunk_index) * session.chunk_size;
+                    const size_t expected_chunk_size = static_cast<size_t>(std::min(session.chunk_size, session.file_size - offset));
+                    if (offset < 0 || offset >= session.file_size || size != expected_chunk_size)
+                    {
+                        resp->set_status_code("400");
+                        resp->append_output_body("{\"error\":\"Chunk size mismatch\"}");
+                        resp->add_header_pair("Content-Type", "application/json");
+                        return;
+                    }
+                }
+
+                const std::string temp_id = chunk_storage_id(username, hash);
+                if (!core::FileManager::save_chunk(temp_id, chunk_index, body, size))
                 {
                     resp->set_status_code("500");
                     resp->append_output_body("{\"error\":\"Failed to save chunk; check var/data permissions and disk space\"}");
@@ -307,15 +384,16 @@ namespace smartnas
             std::string h_name, h_value, hash, fname, total_chunks_str, size_str, directory = "/";
             while (cursor.next(h_name, h_value))
             {
-                if (h_name == "File-Hash")
+                h_name = lower_header(h_name);
+                if (h_name == "file-hash")
                     hash = h_value;
-                if (h_name == "File-Name")
+                if (h_name == "file-name")
                     fname = h_value;
-                if (h_name == "Total-Chunks")
+                if (h_name == "total-chunks")
                     total_chunks_str = h_value;
-                if (h_name == "File-Size")
+                if (h_name == "file-size")
                     size_str = h_value;
-                if (h_name == "Directory")
+                if (h_name == "directory")
                     directory = normalize_dir(utils::HashUtil::url_decode(h_value));
             }
             if (!is_sha256_hex(hash) || total_chunks_str.empty() || size_str.empty())
@@ -363,10 +441,31 @@ namespace smartnas
             }
             else
             {
+                UploadSession session;
+                {
+                    std::lock_guard<std::mutex> lock(upload_sessions_mutex);
+                    auto found = upload_sessions.find(upload_session_key(username, hash));
+                    if (found == upload_sessions.end())
+                    {
+                        resp->set_status_code("409");
+                        resp->append_output_body("{\"error\":\"Upload session not initialized\"}");
+                        resp->add_header_pair("Content-Type", "application/json");
+                        return;
+                    }
+                    session = found->second;
+                }
+                if (session.total_chunks != total_chunks || session.file_size != expected_size)
+                {
+                    resp->set_status_code("400");
+                    resp->append_output_body("{\"error\":\"Merge parameters do not match initialized upload session\"}");
+                    resp->add_header_pair("Content-Type", "application/json");
+                    return;
+                }
                 std::string final_filename = hash + ".bin";
                 std::string actual_hash;
                 size_t actual_size = 0;
-                if (!core::FileManager::merge_chunks(hash, total_chunks, final_filename, actual_hash, actual_size))
+                const std::string temp_id = chunk_storage_id(username, hash);
+                if (!core::FileManager::merge_chunks(temp_id, total_chunks, final_filename, actual_hash, actual_size))
                 {
                     resp->set_status_code("409");
                     resp->append_output_body("{\"error\":\"Failed to merge chunks; a chunk may be missing or storage is unavailable\"}");
@@ -396,7 +495,11 @@ namespace smartnas
                     return;
                 }
 
-                core::FileManager::delete_chunks(hash, total_chunks);
+                core::FileManager::delete_chunks(temp_id, total_chunks);
+                {
+                    std::lock_guard<std::mutex> lock(upload_sessions_mutex);
+                    upload_sessions.erase(upload_session_key(username, hash));
+                }
                 status_msg = "File merged and indexed.";
                 should_save_metadata = true;
             }

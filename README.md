@@ -138,7 +138,8 @@ export SMARTNAS_TASK_DB=var/cache/agent_tasks.db
 export SMARTNAS_AUDIT_LOG=var/log/agent_audit.jsonl
 export SMARTNAS_AUDIT_LOG_MAX_BYTES=20971520
 export SMARTNAS_AUDIT_LOG_BACKUPS=10
-export SMARTNAS_AUDIT_LOG_FULL_CONTENT=1
+export SMARTNAS_AUDIT_LOG_FULL_CONTENT=0
+export SMARTNAS_JWT_SECRET=change-me-to-a-long-random-secret
 ./scripts/start_smartnas.sh
 ```
 
@@ -209,14 +210,14 @@ python3 scripts/agent_service.py
 ## 已知限制
 
 - 当前更适合局域网和个人实验环境，尚未按公网服务标准加固。
-- JWT secret 仍需要改为外部配置。
-- 密码存储需要升级为 bcrypt 或 Argon2。
+- JWT secret 优先从 `SMARTNAS_JWT_SECRET` 读取；未配置时会生成进程临时 secret，重启后旧 token 失效。
+- 密码存储已从裸 SHA-256 升级为带 salt 的 PBKDF2-HMAC-SHA256；旧账号会在成功登录后自动迁移。
 - 下载、Agent 转换和前端 hash 计算仍有大文件内存压力。
-- 分片上传需要更严格的 hash、index、大小和用户会话校验。
+- 分片上传已有 hash、index、大小和用户会话校验；后续仍可补持久化上传会话与限速。
 - 回收站和分享仍需要进一步完善权限边界。
 - Agent 聊天会优先使用 RAG 原文片段检索；如果向量依赖、embedding 模型或索引不可用，则回退到摘要关键词搜索。
 - 图片摘要目前主要依赖元信息或 fallback，真正的 OCR / 视觉模型理解仍属于后续功能。
-- 默认审计日志会保存完整问答、Markdown 提取结果和模型输出，包含用户文件内容；生产环境应限制日志文件权限，或设置 `SMARTNAS_AUDIT_LOG_FULL_CONTENT=0` 截断长内容。
+- 默认审计日志会截断长内容，并尝试使用 `0600` 权限；如果显式设置 `SMARTNAS_AUDIT_LOG_FULL_CONTENT=1`，会保存完整问答、Markdown 提取结果和模型输出。
 
 ## 预期功能
 

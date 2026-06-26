@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent import llm_client
+from agent import config, llm_client
 from agent.schemas import FileQuestionRequest
 from agent.sse import sse_event
 
@@ -32,6 +32,9 @@ class AgentModuleTests(unittest.TestCase):
     def test_request_schema(self):
         request = FileQuestionRequest(hash="abc", question="内容是什么？")
         self.assertEqual(request.hash, "abc")
+
+    def test_audit_full_content_disabled_by_default(self):
+        self.assertFalse(config.AUDIT_LOG_FULL_CONTENT)
 
     def test_sse_event(self):
         event = sse_event("delta", content="你好")
