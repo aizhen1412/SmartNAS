@@ -149,10 +149,7 @@ Agent 配置优先级为：环境变量 > `config/config.json` > 代码默认值
 文档文件：
 
 - `docs/architecture.md`：当前整体架构、目录和逐文件职责。
-- `docs/project-flow-tree.md`：端到端流程树，以及每个文件的作用、输入和输出。
 - `docs/agent-service.md`：Agent 配置、API、缓存和后台任务。
-- `docs/agent-decoupling.md`：Core 与 Agent 的服务边界。
-- `docs/code-architecture.md`：结构审计、遗留风险与后续演进路线。
 
 ```bash
 cmake -S . -B build

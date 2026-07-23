@@ -18,6 +18,15 @@ var/
 *.db
 *.sqlite
 
+# --- 下载或生成的数据集 ---
+# 由 scripts/download_test_corpus.py 获取，仅用于本地检索评测。
+tests/data/corpus/
+
+# --- 本地模型与依赖缓存 ---
+.venv/
+.huggingface/
+*.egg-info/
+
 # --- AI 模型文件 ---
 models/
 

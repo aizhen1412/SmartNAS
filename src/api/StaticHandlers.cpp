@@ -92,6 +92,7 @@ namespace smartnas
             const auto &config = smartnas::config::AppConfig::get_instance();
             const std::map<std::string, std::pair<std::string, std::string>> assets = {
                 {"/assets/css/app.css", {config.web_path("css/app.css").string(), "text/css; charset=utf-8"}},
+                {"/assets/js/state.js", {config.web_path("js/state.js").string(), "application/javascript; charset=utf-8"}},
                 {"/assets/js/core.js", {config.web_path("js/core.js").string(), "application/javascript; charset=utf-8"}},
                 {"/assets/js/files.js", {config.web_path("js/files.js").string(), "application/javascript; charset=utf-8"}},
                 {"/assets/js/upload.js", {config.web_path("js/upload.js").string(), "application/javascript; charset=utf-8"}},

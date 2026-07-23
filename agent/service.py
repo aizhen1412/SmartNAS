@@ -1,28 +1,19 @@
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import hashlib
 import json
 import logging
 import os
 import requests
 import re
-import shutil
-import sqlite3
-import tempfile
 import threading
 import time
 import uuid
-import io
-import mimetypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from urllib.parse import unquote
-
-from PIL import Image, ExifTags
 
 from .config import (
     AUDIT_LOG_BACKUPS,
@@ -31,58 +22,41 @@ from .config import (
     AUDIT_LOG_PATH,
     AGENT_HOST,
     AGENT_PORT,
-    CACHE_DIR,
-    CACHE_FORMAT_VERSION,
     DEEPSEEK_API_BASE,
     DEEPSEEK_API_KEY,
     DEEPSEEK_MODEL,
-    EMBEDDING_MODEL_NAME,
     FILE_QA_DIRECT_CHARS,
     GENERATION_TEMPERATURE,
     GENERATION_TOP_P,
     MAX_MARKDOWN_CHARS,
     NAS_CORE_API,
     RAG_CHUNK_CHARS,
-    RAG_CHUNK_OVERLAP,
-    RAG_MIN_SCORE,
     RAG_TOP_K,
     SUMMARY_CHUNK_CHARS,
     SUMMARY_WORKER_COUNT,
     TASK_DB_PATH,
-    VECTOR_DIR,
 )
+from .core_client import fetch_all_user_files, get_user_identity
+from .index_service import compute_missing_index_files
+from .keyword_store import keyword_index_status, mark_keyword_index_dirty, rebuild_keyword_index
 from .llm_client import (
     clean_model_text,
     create_chat_completion,
     create_chat_message,
     stream_chat_completion,
 )
-from .schemas import ChatRequest, FileQuestionRequest, RagQueryRequest, SummarizeRequest
+from .markdown_service import MarkdownService
+from .rag_store import (
+    health_status as rag_health_status,
+    index_markdown_for_rag,
+    index_status as rag_index_status,
+    rag_has_file_index,
+    set_audit_callback as set_rag_audit_callback,
+)
+from .retrieval_service import RetrievalFilters, search_documents
+from .schemas import ChatRequest, FileQuestionRequest, IndexRebuildRequest, RagQueryRequest, SummarizeRequest
 from .sse import sse_event, sse_response
-
-try:
-    import numpy as np
-except Exception as exc:
-    np = None
-    NUMPY_IMPORT_ERROR = exc
-else:
-    NUMPY_IMPORT_ERROR = None
-
-try:
-    import faiss
-except Exception as exc:
-    faiss = None
-    FAISS_IMPORT_ERROR = exc
-else:
-    FAISS_IMPORT_ERROR = None
-
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception as exc:
-    SentenceTransformer = None
-    SENTENCE_TRANSFORMERS_IMPORT_ERROR = exc
-else:
-    SENTENCE_TRANSFORMERS_IMPORT_ERROR = None
+from .task_store import TaskStore
 
 try:
     from markitdown import MarkItDown
@@ -103,19 +77,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-embedding_model = None
 markitdown_converter = None
-embedding_generation_lock = threading.Lock()
-vector_store_lock = threading.Lock()
-vector_reconcile_cache: Dict[str, Dict[str, Any]] = {}
-vector_reconcile_cache_lock = threading.Lock()
-VECTOR_RECONCILE_TTL_SECONDS = 30
 summary_executor = ThreadPoolExecutor(max_workers=SUMMARY_WORKER_COUNT)
 summary_tasks: Dict[str, Dict[str, Any]] = {}
 summary_tasks_lock = threading.Lock()
 task_cancel_events: Dict[str, threading.Event] = {}
-identity_cache: Dict[str, Dict[str, Any]] = {}
-identity_cache_lock = threading.Lock()
+index_tasks: Dict[str, Dict[str, Any]] = {}
+index_tasks_lock = threading.Lock()
+task_store = TaskStore(TASK_DB_PATH)
 audit_logger = logging.getLogger("smartnas.agent.audit")
 
 def init_audit_logger() -> None:
@@ -158,6 +127,7 @@ def audit_content(value: str) -> str:
     return value[:2000] + f"\n...[审计内容已截断，原始字符数 {len(value)}]"
 
 init_audit_logger()
+set_rag_audit_callback(audit_event)
 
 @app.middleware("http")
 async def audit_http_request(request, call_next):
@@ -251,6 +221,77 @@ SEARCH_FILE_TOOLS = [
     }
 ]
 
+QUERY_ROUTING_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "choose_query_route",
+            "description": "选择回答当前 SmartNAS 问题所需的检索方式",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "route": {
+                        "type": "string",
+                        "enum": ["catalog", "rag"],
+                        "description": "catalog 用于文件是否存在、文件列表、目录和文件名；rag 用于文件内容、主题、事实和总结",
+                    },
+                },
+                "required": ["route"],
+            },
+        },
+    }
+]
+
+def choose_query_route(prompt: str) -> str:
+    decision = create_chat_message(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是 SmartNAS 查询路由器，必须调用 choose_query_route。"
+                    "查询文件是否存在、文件名、目录、列表或‘索引了什么文件’时选 catalog；"
+                    "查询文件内容、主题、事实、比较、总结时选 rag。"
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        QUERY_ROUTING_TOOLS,
+    )
+    for call in decision.get("tool_calls") or []:
+        function = call.get("function") or {}
+        if function.get("name") != "choose_query_route":
+            continue
+        try:
+            route = json.loads(function.get("arguments") or "{}").get("route")
+        except ValueError:
+            route = None
+        if route in {"catalog", "rag"}:
+            return route
+    return "rag"
+
+def build_file_catalog_messages(question: str, token: str) -> List[dict]:
+    files = fetch_all_user_files(token)
+    catalog = [
+        {
+            "name": item.get("name") or "",
+            "directory": item.get("directory") or "/",
+        }
+        for item in files
+        if item.get("name")
+    ]
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是 SmartNAS 的文件目录助手。下面的目录是当前用户全部可访问文件的唯一事实来源。"
+                "只根据目录回答文件是否存在、有哪些文件或位于什么路径；不要把文件内容检索结果当作目录。"
+                "可以识别常见的中英文书名翻译，例如《理想国》对应 The Republic。"
+                f"\n\n文件总数：{len(catalog)}\n文件目录：\n{json.dumps(catalog, ensure_ascii=False)}"
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+
 class TaskCancelled(Exception):
     pass
 
@@ -269,85 +310,12 @@ def get_markitdown_converter():
     markitdown_converter = MarkItDown()
     return markitdown_converter
 
-def get_embedding_model():
-    global embedding_model
-    if embedding_model is not None:
-        return embedding_model
-
-    if SentenceTransformer is None:
-        raise HTTPException(status_code=503, detail=f"sentence-transformers 加载失败: {SENTENCE_TRANSFORMERS_IMPORT_ERROR}")
-
-    embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    return embedding_model
-
-def encode_texts(texts: List[str]):
-    if np is None:
-        raise HTTPException(status_code=503, detail=f"numpy 加载失败: {NUMPY_IMPORT_ERROR}")
-    if not texts:
-        return np.zeros((0, 0), dtype="float32")
-
-    model = get_embedding_model()
-    with embedding_generation_lock:
-        vectors = model.encode(
-            texts,
-            batch_size=16,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-    return np.asarray(vectors, dtype="float32")
+markdown_service = MarkdownService(SUPPORTED_SUMMARY_EXTENSIONS, get_markitdown_converter)
 
 def require_bearer_token(authorization: Optional[str]) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing SmartNAS bearer token")
     return authorization
-
-def get_user_identity(token: str) -> str:
-    cache_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    now = time.time()
-    with identity_cache_lock:
-        cached = identity_cache.get(cache_key)
-        if cached and cached["expires_at"] > now:
-            return cached["username"]
-    try:
-        response = requests.get(
-            f"{NAS_CORE_API}/api/v1/me",
-            headers={"Authorization": token},
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"无法验证用户身份: {exc}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=401, detail="SmartNAS 登录状态无效或已过期")
-    username = (response.json().get("username") or "").strip()
-    if not username:
-        raise HTTPException(status_code=502, detail="核心服务未返回用户身份")
-    with identity_cache_lock:
-        identity_cache[cache_key] = {"username": username, "expires_at": now + 30}
-    return username
-
-def fetch_all_user_files(token: str) -> List[Dict[str, Any]]:
-    try:
-        response = requests.get(
-            f"{NAS_CORE_API}/api/v1/files/all",
-            headers={"Authorization": token},
-            timeout=20,
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"无法读取完整文件清单: {exc}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="核心服务无法返回完整文件清单")
-    payload = response.json()
-    return payload.get("files", payload if isinstance(payload, list) else [])
-
-def filename_from_content_disposition(header_value: str) -> str:
-    if not header_value:
-        return "document"
-
-    match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', header_value, re.IGNORECASE)
-    if not match:
-        return "document"
-
-    return unquote(match.group(1)).strip() or "document"
 
 def split_text(value: str, max_chars: int) -> List[str]:
     chunks = []
@@ -374,190 +342,6 @@ def split_text(value: str, max_chars: int) -> List[str]:
         chunks.append("\n".join(current).strip())
 
     return [chunk for chunk in chunks if chunk]
-
-def split_markdown_for_rag(value: str, max_chars: int, overlap: int) -> List[str]:
-    chunks = split_text(value, max_chars)
-    if overlap <= 0 or len(chunks) < 2:
-        return chunks
-
-    overlapped = []
-    previous_tail = ""
-    for chunk in chunks:
-        text = f"{previous_tail}\n{chunk}".strip() if previous_tail else chunk
-        overlapped.append(text)
-        previous_tail = chunk[-overlap:]
-    return overlapped
-
-def vector_namespace(token: str) -> str:
-    username = get_user_identity(token)
-    return hashlib.sha256(username.encode("utf-8")).hexdigest()[:24]
-
-def vector_namespace_dir(token: str) -> Path:
-    path = VECTOR_DIR / vector_namespace(token)
-    legacy = VECTOR_DIR / hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
-    if not path.exists() and legacy.exists() and legacy != path:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(legacy), str(path))
-    return path
-
-def vector_chunks_path(token: str) -> Path:
-    return vector_namespace_dir(token) / "chunks.json"
-
-def vector_index_path(token: str) -> Path:
-    return vector_namespace_dir(token) / "index.faiss"
-
-def load_vector_chunks(token: str) -> List[Dict[str, Any]]:
-    path = vector_chunks_path(token)
-    if not path.exists():
-        return []
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(payload, dict):
-        return payload.get("chunks", [])
-    return payload if isinstance(payload, list) else []
-
-def save_vector_chunks(token: str, chunks: List[Dict[str, Any]]) -> None:
-    chunks = [chunk for chunk in chunks if chunk.get("embedding") and chunk.get("text")]
-    path = vector_chunks_path(token)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": 2,
-        "embedding_model": EMBEDDING_MODEL_NAME,
-        "updated_at": int(time.time()),
-        "chunks": chunks,
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    index_path = vector_index_path(token)
-    if faiss is not None and chunks:
-        embeddings = np.asarray([chunk["embedding"] for chunk in chunks], dtype="float32")
-        index = faiss.IndexFlatIP(embeddings.shape[1])
-        index.add(embeddings)
-        temp_path = index_path.with_suffix(".tmp")
-        faiss.write_index(index, str(temp_path))
-        os.replace(temp_path, index_path)
-    elif index_path.exists():
-        index_path.unlink()
-
-def rag_has_file_index(token: str, file_hash: str) -> bool:
-    with vector_store_lock:
-        return any(chunk.get("hash") == file_hash for chunk in load_vector_chunks(token))
-
-def reconcile_vector_store(token: str) -> Dict[str, int]:
-    owner = get_user_identity(token)
-    now = time.time()
-    with vector_reconcile_cache_lock:
-        cached = vector_reconcile_cache.get(owner)
-        if cached and now - cached.get("checked_at", 0) < VECTOR_RECONCILE_TTL_SECONDS:
-            return cached["result"]
-
-    files = fetch_all_user_files(token)
-    active = {item.get("hash"): item.get("name", "") for item in files if item.get("hash")}
-    with vector_store_lock:
-        chunks = load_vector_chunks(token)
-        kept = []
-        removed = 0
-        renamed = 0
-        for chunk in chunks:
-            file_hash = chunk.get("hash")
-            if file_hash not in active:
-                removed += 1
-                continue
-            filename = active[file_hash]
-            if filename and chunk.get("filename") != filename:
-                chunk["filename"] = filename
-                renamed += 1
-            kept.append(chunk)
-        if removed or renamed:
-            save_vector_chunks(token, kept)
-    result = {"active_files": len(active), "removed_chunks": removed, "renamed_chunks": renamed}
-    with vector_reconcile_cache_lock:
-        vector_reconcile_cache[owner] = {"checked_at": now, "result": result}
-    audit_event(owner, "index_reconcile", "success", result=result)
-    return result
-
-def index_markdown_for_rag(file_hash: str, filename: str, markdown_text: str, token: str) -> int:
-    raw_chunks = split_markdown_for_rag(markdown_text, RAG_CHUNK_CHARS, RAG_CHUNK_OVERLAP)
-    raw_chunks = [chunk for chunk in raw_chunks if chunk.strip()]
-    if not raw_chunks:
-        return 0
-
-    vectors = encode_texts(raw_chunks)
-    now = int(time.time())
-    new_chunks = []
-    for index, chunk in enumerate(raw_chunks):
-        new_chunks.append(
-            {
-                "id": f"{file_hash}:{index}",
-                "hash": file_hash,
-                "filename": filename,
-                "chunk_index": index,
-                "text": chunk,
-                "full_document": True,
-                "embedding": vectors[index].tolist(),
-                "updated_at": now,
-            }
-        )
-
-    with vector_store_lock:
-        existing = [chunk for chunk in load_vector_chunks(token) if chunk.get("hash") != file_hash]
-        existing.extend(new_chunks)
-        save_vector_chunks(token, existing)
-    return len(new_chunks)
-
-def search_rag_chunks(query: str, token: str, top_k: int = RAG_TOP_K, file_hash: Optional[str] = None) -> Dict[str, Any]:
-    if not query.strip():
-        return {"available": True, "results": [], "reason": "empty query"}
-
-    reconcile_vector_store(token)
-    with vector_store_lock:
-        chunks = load_vector_chunks(token)
-    chunks = [chunk for chunk in chunks if chunk.get("embedding") and chunk.get("text")]
-    if file_hash:
-        chunks = [chunk for chunk in chunks if chunk.get("hash") == file_hash]
-    if not chunks:
-        return {"available": True, "results": [], "reason": "empty index"}
-
-    query_vector = encode_texts([query])
-    if query_vector.shape[0] == 0:
-        return {"available": True, "results": [], "reason": "empty query vector"}
-
-    embeddings = np.asarray([chunk["embedding"] for chunk in chunks], dtype="float32")
-    if embeddings.ndim != 2 or embeddings.shape[0] == 0:
-        return {"available": True, "results": [], "reason": "empty embeddings"}
-
-    limit = max(1, min(top_k, len(chunks)))
-    persisted_index = vector_index_path(token)
-    if faiss is not None and not file_hash and persisted_index.exists():
-        index = faiss.read_index(str(persisted_index))
-        if index.ntotal != len(chunks):
-            index = faiss.IndexFlatIP(embeddings.shape[1])
-            index.add(embeddings)
-        scores, ids = index.search(query_vector, limit)
-        pairs = zip(ids[0].tolist(), scores[0].tolist())
-    elif faiss is not None:
-        index = faiss.IndexFlatIP(embeddings.shape[1])
-        index.add(embeddings)
-        scores, ids = index.search(query_vector, limit)
-        pairs = zip(ids[0].tolist(), scores[0].tolist())
-    else:
-        scores = embeddings @ query_vector[0]
-        order = np.argsort(-scores)[:limit]
-        pairs = ((int(i), float(scores[i])) for i in order)
-
-    results = []
-    for chunk_index, score in pairs:
-        if chunk_index < 0 or score < RAG_MIN_SCORE:
-            continue
-        chunk = chunks[chunk_index]
-        results.append(
-            {
-                "score": round(float(score), 4),
-                "hash": chunk.get("hash"),
-                "filename": chunk.get("filename"),
-                "chunk_index": chunk.get("chunk_index"),
-                "text": chunk.get("text"),
-            }
-        )
-    return {"available": True, "results": results, "reason": None}
 
 def answer_with_rag(question: str, results: List[Dict[str, Any]], history: Optional[List[dict]] = None) -> str:
     return create_chat_completion(build_rag_messages(question, results, history))
@@ -759,180 +543,8 @@ def build_tags(summary: str, title: str = "") -> List[str]:
         raise HTTPException(status_code=502, detail="标签模型没有返回可用标签")
     return tags
 
-def markdown_cache_path(file_hash: str) -> Path:
-    safe_hash = re.sub(r"[^a-zA-Z0-9_.-]", "_", file_hash)
-    return CACHE_DIR / f"{safe_hash}.v{CACHE_FORMAT_VERSION}.md"
-
-def fetch_file_metadata_for_summary(file_hash: str, token: str):
-    try:
-        response = requests.head(
-            f"{NAS_CORE_API}/download",
-            params={"hash": file_hash},
-            headers={"Authorization": token},
-            timeout=60,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"无法连接核心下载接口: {exc}")
-
-    try:
-        if response.status_code == 403:
-            raise HTTPException(status_code=403, detail="没有权限读取该文件")
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail="文件不存在")
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=f"核心下载接口返回 {response.status_code}")
-
-        filename = filename_from_content_disposition(response.headers.get("Content-Disposition", ""))
-        suffix = Path(filename).suffix.lower()
-        if suffix not in SUPPORTED_SUMMARY_EXTENSIONS:
-            raise HTTPException(status_code=415, detail=f"暂不支持该文件类型: {suffix or 'unknown'}")
-        return filename, suffix
-    finally:
-        response.close()
-
-def download_file_for_summary(file_hash: str, token: str, filename: Optional[str] = None, suffix: Optional[str] = None):
-    if filename is None or suffix is None:
-        filename, suffix = fetch_file_metadata_for_summary(file_hash, token)
-    try:
-        download = requests.get(
-            f"{NAS_CORE_API}/download",
-            params={"hash": file_hash},
-            headers={"Authorization": token},
-            timeout=60,
-            stream=True,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"无法连接核心下载接口: {exc}")
-
-    if download.status_code == 403:
-        download.close()
-        raise HTTPException(status_code=403, detail="没有权限读取该文件")
-    if download.status_code == 404:
-        download.close()
-        raise HTTPException(status_code=404, detail="文件不存在")
-    if download.status_code != 200:
-        download.close()
-        raise HTTPException(status_code=download.status_code, detail=f"核心下载接口返回 {download.status_code}")
-
-    temp_file = tempfile.NamedTemporaryFile(prefix="smartnas_", suffix=suffix, delete=False)
-    temp_path = Path(temp_file.name)
-    try:
-        with temp_file:
-            for chunk in download.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    temp_file.write(chunk)
-    except Exception as exc:
-        temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=502, detail=f"核心下载流读取失败: {exc}")
-    finally:
-        download.close()
-
-    return filename, suffix, temp_path
-
-def image_to_markdown(filename: str, content: bytes) -> str:
-    with Image.open(io.BytesIO(content)) as image:
-        lines = [
-            f"# {filename}",
-            "",
-            "## Image Metadata",
-            f"- Format: {image.format or 'unknown'}",
-            f"- Size: {image.width} x {image.height}",
-            f"- Mode: {image.mode}",
-        ]
-
-        if getattr(image, "is_animated", False):
-            lines.append(f"- Animated: yes")
-            lines.append(f"- Frames: {getattr(image, 'n_frames', 'unknown')}")
-
-        exif = getattr(image, "getexif", lambda: {})()
-        if exif:
-            tag_names = {value: key for key, value in ExifTags.TAGS.items()}
-            interesting = [
-                "ImageDescription",
-                "Make",
-                "Model",
-                "DateTime",
-                "DateTimeOriginal",
-                "Artist",
-                "Copyright",
-                "UserComment",
-                "XPTitle",
-                "XPComment",
-                "XPKeywords",
-                "GPSInfo",
-            ]
-            lines.extend(["", "## EXIF"])
-            for name in interesting:
-                tag_id = tag_names.get(name)
-                if tag_id in exif:
-                    value = exif.get(tag_id)
-                    if isinstance(value, bytes):
-                        value = value.decode("utf-8", errors="ignore").strip("\x00")
-                    lines.append(f"- {name}: {value}")
-
-        return "\n".join(lines).strip()
-
-def text_like_to_markdown(filename: str, content: bytes) -> str:
-    text = content.decode("utf-8", errors="replace")
-    return f"# {filename}\n\n```text\n{text}\n```"
-
-def media_to_markdown(filename: str, suffix: str, content: bytes) -> str:
-    mime_type, _ = mimetypes.guess_type(filename)
-    lines = [
-        f"# {filename}",
-        "",
-        "## Media Metadata",
-        f"- Type: {suffix.lstrip('.') or 'unknown'}",
-        f"- MIME: {mime_type or 'unknown'}",
-        f"- Size: {len(content)} bytes",
-    ]
-    return "\n".join(lines)
-
-def fallback_markdown(filename: str, suffix: str, content: bytes) -> str:
-    if suffix in IMAGE_EXTENSIONS:
-        return image_to_markdown(filename, content)
-    if suffix in TEXT_LIKE_EXTENSIONS:
-        return text_like_to_markdown(filename, content)
-    if suffix in MEDIA_EXTENSIONS:
-        return media_to_markdown(filename, suffix, content)
-    return ""
-
 def convert_file_to_markdown(file_hash: str, token: str, force: bool = False):
-    cache_path = markdown_cache_path(file_hash)
-    filename, suffix = fetch_file_metadata_for_summary(file_hash, token)
-    if cache_path.exists() and not force:
-        return filename, cache_path.read_text(encoding="utf-8"), True
-
-    filename, suffix, temp_path = download_file_for_summary(file_hash, token, filename, suffix)
-
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        markdown_text = ""
-
-        try:
-            if suffix in IMAGE_EXTENSIONS:
-                markdown_text = fallback_markdown(filename, suffix, temp_path.read_bytes())
-            else:
-                converter = get_markitdown_converter()
-                try:
-                    converted = converter.convert_local(str(temp_path))
-                except AttributeError:
-                    converted = converter.convert(str(temp_path))
-                markdown_text = converted.text_content
-        except Exception as exc:
-            if suffix not in IMAGE_EXTENSIONS and suffix not in TEXT_LIKE_EXTENSIONS and suffix not in MEDIA_EXTENSIONS:
-                raise HTTPException(status_code=422, detail=f"MarkItDown 转换失败: {exc}")
-
-        if not markdown_text.strip():
-            try:
-                markdown_text = fallback_markdown(filename, suffix, temp_path.read_bytes())
-            except Exception as exc:
-                raise HTTPException(status_code=422, detail=f"文件转换失败: {exc}")
-
-        cache_path.write_text(markdown_text, encoding="utf-8")
-        return filename, markdown_text, False
-    finally:
-        temp_path.unlink(missing_ok=True)
+    return markdown_service.convert(file_hash, token, force)
 
 def update_core_summary(file_hash: str, token: str, summary: str):
     try:
@@ -977,6 +589,8 @@ def run_summary(file_hash: str, token: str, force: bool = False, cancel_event: O
     try:
         rag_status["chunks"] = index_markdown_for_rag(file_hash, filename, markdown_text, token)
         rag_status["indexed"] = rag_status["chunks"] > 0
+        if rag_status["indexed"]:
+            rag_status["keyword"] = rebuild_keyword_index(token)
     except Exception as exc:
         rag_status["error"] = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
     check_task_cancel(cancel_event)
@@ -992,63 +606,15 @@ def run_summary(file_hash: str, token: str, force: bool = False, cancel_event: O
     }
 
 def init_task_store() -> None:
-    TASK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(TASK_DB_PATH) as db:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_tasks (
-                id TEXT PRIMARY KEY,
-                owner TEXT NOT NULL,
-                file_hash TEXT NOT NULL,
-                force INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL,
-                message TEXT,
-                result_json TEXT,
-                error TEXT,
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL
-            )
-            """
-        )
-        db.execute(
-            "UPDATE agent_tasks SET status = 'failed', message = 'Agent 重启导致任务中断', "
-            "error = 'interrupted', updated_at = ? WHERE status IN ('pending', 'running', 'cancel_requested')",
-            (time.time(),),
-        )
-        rows = db.execute(
-            "SELECT id, owner, file_hash, force, status, message, result_json, error, created_at, updated_at "
-            "FROM agent_tasks ORDER BY created_at DESC LIMIT 500"
-        ).fetchall()
-    for row in reversed(rows):
-        result = json.loads(row[6]) if row[6] else None
-        summary_tasks[row[0]] = {
-            "id": row[0], "owner": row[1], "hash": row[2], "force": bool(row[3]),
-            "status": row[4], "message": row[5] or "", "result": result,
-            "error": row[7], "created_at": row[8], "updated_at": row[9],
-        }
+    tasks = task_store.initialize()
+    summary_tasks.update({task["id"]: task for task in tasks["summary"]})
+    index_tasks.update({task["id"]: task for task in tasks["index"]})
 
 def persist_summary_task(task: Dict[str, Any]) -> None:
-    TASK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(TASK_DB_PATH) as db:
-        db.execute(
-            """
-            INSERT INTO agent_tasks
-                (id, owner, file_hash, force, status, message, result_json, error, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                status = excluded.status,
-                message = excluded.message,
-                result_json = excluded.result_json,
-                error = excluded.error,
-                updated_at = excluded.updated_at
-            """,
-            (
-                task["id"], task["owner"], task["hash"], int(task.get("force", False)),
-                task["status"], task.get("message", ""),
-                json.dumps(task.get("result"), ensure_ascii=False) if task.get("result") is not None else None,
-                task.get("error"), task["created_at"], task["updated_at"],
-            ),
-        )
+    task_store.save(task, "summary")
+
+def persist_index_task(task: Dict[str, Any]) -> None:
+    task_store.save(task, "index")
 
 def set_summary_task(task_id: str, **updates):
     with summary_tasks_lock:
@@ -1126,6 +692,138 @@ def enqueue_summary(file_hash: str, token: str, force: bool = False):
     summary_executor.submit(summary_task_worker, task_id, file_hash, token, force)
     return summary_tasks[task_id]
 
+def find_missing_index_files(token: str) -> Dict[str, Any]:
+    return compute_missing_index_files(fetch_all_user_files(token), rag_index_status(token), SUPPORTED_SUMMARY_EXTENSIONS)
+
+def rebuild_index_for_file(file_hash: str, token: str, force: bool = False) -> Dict[str, Any]:
+    filename, markdown_text, cache_hit = convert_file_to_markdown(file_hash, token, force)
+    chunks = index_markdown_for_rag(file_hash, filename, markdown_text, token)
+    mark_keyword_index_dirty(token, "file index rebuilt")
+    return {
+        "hash": file_hash,
+        "filename": filename,
+        "markdown_chars": len(markdown_text),
+        "cache_hit": cache_hit,
+        "chunks": chunks,
+        "indexed": chunks > 0,
+    }
+
+def rebuild_indexes(token: str, force: bool = False, file_hash: Optional[str] = None, include_keyword: bool = True) -> Dict[str, Any]:
+    targets = []
+    skipped_unsupported = []
+    if file_hash:
+        targets.append({"hash": file_hash})
+    elif not force:
+        missing = find_missing_index_files(token)
+        targets = missing["missing"]
+        skipped_unsupported = missing["skipped_unsupported"]
+    else:
+        for file_info in fetch_all_user_files(token):
+            current_hash = file_info.get("hash", "")
+            name = file_info.get("name", "")
+            if not current_hash:
+                continue
+            if Path(name).suffix.lower() not in SUPPORTED_SUMMARY_EXTENSIONS:
+                skipped_unsupported.append({"hash": current_hash, "name": name})
+                continue
+            targets.append({"hash": current_hash, "name": name})
+
+    indexed = []
+    failed = []
+    for target in targets:
+        current_hash = target.get("hash", "")
+        if not current_hash:
+            continue
+        try:
+            indexed.append(rebuild_index_for_file(current_hash, token, force))
+        except Exception as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            failed.append({"hash": current_hash, "name": target.get("name", ""), "error": str(detail)})
+
+    keyword = None
+    if include_keyword:
+        try:
+            keyword = rebuild_keyword_index(token)
+        except Exception as exc:
+            keyword = {"error": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)}
+
+    return {
+        "status": "success" if not failed else "partial_success",
+        "target_count": len(targets),
+        "indexed_count": len(indexed),
+        "failed_count": len(failed),
+        "indexed": indexed,
+        "failed": failed,
+        "skipped_unsupported": skipped_unsupported,
+        "keyword": keyword,
+    }
+
+def set_index_task(task_id: str, **updates):
+    with index_tasks_lock:
+        if task_id in index_tasks:
+            index_tasks[task_id].update(updates)
+            index_tasks[task_id]["updated_at"] = time.time()
+            persist_index_task(index_tasks[task_id])
+
+def index_task_worker(task_id: str, token: str, owner: str, force: bool, file_hash: Optional[str], include_keyword: bool):
+    started_at = time.time()
+    set_index_task(task_id, status="running", message="正在重建索引")
+    audit_event(owner, "index_rebuild_task", "running", task_id=task_id, file_hash=file_hash, force=force)
+    try:
+        result = rebuild_indexes(token, force=force, file_hash=file_hash, include_keyword=include_keyword)
+        set_index_task(task_id, status=result["status"], message="索引重建完成", result=result)
+        audit_event(
+            owner,
+            "index_rebuild_task",
+            result["status"],
+            task_id=task_id,
+            duration_ms=round((time.time() - started_at) * 1000),
+            result={**result, "indexed": f"{len(result.get('indexed', []))} files"},
+        )
+    except Exception as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        set_index_task(task_id, status="failed", message=f"索引重建失败: {detail}", error=str(detail))
+        audit_event(
+            owner,
+            "index_rebuild_task",
+            "failed",
+            task_id=task_id,
+            duration_ms=round((time.time() - started_at) * 1000),
+            error=str(detail),
+        )
+
+def enqueue_index_rebuild(token: str, owner: str, force: bool = False, file_hash: Optional[str] = None, include_keyword: bool = True):
+    task_id = uuid.uuid4().hex
+    now = time.time()
+    with index_tasks_lock:
+        duplicate = next(
+            (
+                task for task in index_tasks.values()
+                if task.get("owner") == owner
+                and task.get("hash") == (file_hash or "")
+                and task.get("status") in {"pending", "running"}
+            ),
+            None,
+        )
+        if duplicate:
+            audit_event(owner, "index_rebuild_enqueue", "deduplicated", existing_task_id=duplicate.get("id"))
+            return duplicate
+        index_tasks[task_id] = {
+            "id": task_id,
+            "owner": owner,
+            "hash": file_hash or "",
+            "force": force,
+            "include_keyword": include_keyword,
+            "status": "pending",
+            "message": "等待索引重建任务执行",
+            "created_at": now,
+            "updated_at": now,
+        }
+        persist_index_task(index_tasks[task_id])
+        audit_event(owner, "index_rebuild_enqueue", "queued", task=index_tasks[task_id])
+    summary_executor.submit(index_task_worker, task_id, token, owner, force, file_hash, include_keyword)
+    return index_tasks[task_id]
+
 init_task_store()
 
 @app.get("/api/agent/health")
@@ -1149,22 +847,7 @@ async def health():
         },
         "markitdown_available": MarkItDown is not None,
         "markitdown_error": str(MARKITDOWN_IMPORT_ERROR) if MARKITDOWN_IMPORT_ERROR else None,
-        "rag": {
-            "embedding_model": EMBEDDING_MODEL_NAME,
-            "embedding_loaded": embedding_model is not None,
-            "sentence_transformers_available": SentenceTransformer is not None,
-            "sentence_transformers_error": str(SENTENCE_TRANSFORMERS_IMPORT_ERROR) if SENTENCE_TRANSFORMERS_IMPORT_ERROR else None,
-            "numpy_available": np is not None,
-            "numpy_error": str(NUMPY_IMPORT_ERROR) if NUMPY_IMPORT_ERROR else None,
-            "faiss_available": faiss is not None,
-            "faiss_error": str(FAISS_IMPORT_ERROR) if FAISS_IMPORT_ERROR else None,
-            "vector_dir": str(VECTOR_DIR),
-            "persistent_faiss": faiss is not None,
-            "chunk_chars": RAG_CHUNK_CHARS,
-            "chunk_overlap": RAG_CHUNK_OVERLAP,
-            "top_k": RAG_TOP_K,
-            "min_score": RAG_MIN_SCORE,
-        },
+        "rag": rag_health_status(),
         "summary_extensions": sorted(SUPPORTED_SUMMARY_EXTENSIONS),
     }
 
@@ -1328,13 +1011,20 @@ def prepare_file_qa_context(owner: str, token: str, file_hash: str, question: st
     if len(markdown_text) > FILE_QA_DIRECT_CHARS:
         mode = "rag"
         if not rag_has_file_index(token, file_hash):
-            index_markdown_for_rag(file_hash, filename, markdown_text, token)
+            chunks = index_markdown_for_rag(file_hash, filename, markdown_text, token)
+            if chunks > 0:
+                mark_keyword_index_dirty(token, "file qa indexed missing chunks")
         previous_question = next(
             (item.get("content", "") for item in reversed(history) if item.get("role") == "user"),
             "",
         )
         retrieval_query = f"{previous_question}\n{question}".strip()
-        search = search_rag_chunks(retrieval_query, token, max(RAG_TOP_K, 8), file_hash=file_hash)
+        search = search_documents(
+            retrieval_query,
+            token,
+            max(RAG_TOP_K, 8),
+            filters=RetrievalFilters(file_hash=file_hash),
+        )
         if search.get("results"):
             messages = build_rag_messages(question, search["results"], history)
             sources = [
@@ -1452,7 +1142,16 @@ async def rag_query_endpoint(request: RagQueryRequest, authorization: Optional[s
     if not query:
         raise HTTPException(status_code=400, detail="Missing query")
     try:
-        search = search_rag_chunks(query, token, request.top_k)
+        file_hash_filter = (request.file_hash or request.hash or "").strip() or None
+        search = search_documents(
+            query,
+            token,
+            request.top_k,
+            filters=RetrievalFilters(
+                file_hash=file_hash_filter,
+                directory=(request.directory or "").strip() or None,
+            ),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1464,6 +1163,54 @@ async def rag_query_endpoint(request: RagQueryRequest, authorization: Optional[s
     result = {"status": "success", "query": query, "answer": answer, **search}
     audit_event(owner, "rag_query", "success", duration_ms=round((time.time() - started_at) * 1000), result=result)
     return result
+
+@app.get("/api/agent/index/status")
+async def index_status_endpoint(authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    owner = get_user_identity(token)
+    result = rag_index_status(token)
+    result["keyword"] = keyword_index_status(token)
+    audit_event(owner, "index_status", "success", result={**result, "files": f"{len(result.get('files', []))} files"})
+    return {"status": "success", **result}
+
+@app.get("/api/agent/index/missing")
+async def index_missing_endpoint(authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    owner = get_user_identity(token)
+    result = find_missing_index_files(token)
+    audit_event(owner, "index_missing", "success", result={**result, "missing": f"{len(result.get('missing', []))} files"})
+    return {"status": "success", **result}
+
+@app.post("/api/agent/index/rebuild/start")
+async def start_index_rebuild_endpoint(request: IndexRebuildRequest, authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    owner = get_user_identity(token)
+    file_hash = (request.hash or "").strip() or None
+    task = enqueue_index_rebuild(token, owner, request.force, file_hash, request.include_keyword)
+    audit_event(owner, "index_rebuild_start", "success", task=task)
+    return task
+
+@app.get("/api/agent/index/rebuild/status/{task_id}")
+async def index_rebuild_status_endpoint(task_id: str, authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    owner = get_user_identity(token)
+    with index_tasks_lock:
+        task = index_tasks.get(task_id)
+        if not task or task.get("owner") != owner:
+            audit_event(owner, "index_rebuild_status", "not_found", task_id=task_id)
+            raise HTTPException(status_code=404, detail="索引任务不存在")
+        audit_event(owner, "index_rebuild_status", "success", task=task)
+        return task
+
+@app.get("/api/agent/index/rebuild/tasks")
+async def index_rebuild_tasks_endpoint(authorization: Optional[str] = Header(None)):
+    token = require_bearer_token(authorization)
+    owner = get_user_identity(token)
+    with index_tasks_lock:
+        tasks = [task for task in index_tasks.values() if task.get("owner") == owner]
+        result = {"tasks": tasks[-100:]}
+        audit_event(owner, "index_rebuild_tasks_list", "success", result=result)
+        return result
 
 @app.post("/api/agent/chat")
 async def chat_endpoint(request: ChatRequest, authorization: Optional[str] = Header(None)):
@@ -1486,8 +1233,16 @@ async def chat_endpoint(request: ChatRequest, authorization: Optional[str] = Hea
     history.append({"role": "user", "content": prompt})
 
     try:
+        if choose_query_route(prompt) == "catalog":
+            answer = create_chat_completion(build_file_catalog_messages(prompt, token))
+            history.append({"role": "assistant", "content": answer})
+            result = {"status": "success", "mode": "catalog", "response": answer}
+            audit_event(owner, "chat", "success", prompt=prompt,
+                        duration_ms=round((time.time() - started_at) * 1000), result=result)
+            return result
+
         try:
-            rag_search = search_rag_chunks(prompt, token, RAG_TOP_K)
+            rag_search = search_documents(prompt, token, RAG_TOP_K)
         except Exception as exc:
             print(f"[RAG] Unavailable, fallback to summary search: {exc}")
             rag_search = {"available": False, "results": [], "reason": str(exc)}
@@ -1555,20 +1310,36 @@ async def chat_stream_endpoint(request: ChatRequest, authorization: Optional[str
         history = sessions[owner]
     history.append({"role": "user", "content": prompt})
 
+    catalog_messages = None
     try:
-        rag_search = search_rag_chunks(prompt, token, RAG_TOP_K)
+        route = choose_query_route(prompt)
     except Exception:
+        route = "rag"
+    if route == "catalog":
+        catalog_messages = build_file_catalog_messages(prompt, token)
         rag_search = {"results": []}
+    else:
+        try:
+            rag_search = search_documents(prompt, token, RAG_TOP_K)
+        except Exception:
+            rag_search = {"results": []}
 
     def event_stream():
         answer_parts = []
-        mode = "rag" if rag_search.get("results") else "chat"
+        mode = "catalog" if catalog_messages else ("rag" if rag_search.get("results") else "chat")
         audit_event(owner, "chat_stream", "started", prompt=prompt, mode=mode)
         try:
-            if rag_search.get("results"):
+            if catalog_messages:
+                final_messages = catalog_messages
+            elif rag_search.get("results"):
                 final_messages = build_rag_messages(prompt, rag_search["results"])
             else:
-                # 流式接口直接连接模型流，避免先等待一次完整的工具判定请求。
+                # 检索索引为空或暂不可用时，仍先让模型决定是否查询 Core 的
+                # 文件名、摘要和标签；否则模型看不到用户的文件清单，容易误报
+                # “找不到文件”。
+                assistant_message = create_chat_message(history, SEARCH_FILE_TOOLS)
+                if append_tool_results(history, assistant_message, token):
+                    mode = "tool"
                 final_messages = history
 
             if final_messages is not None:

@@ -121,9 +121,9 @@ data: {"type":"error","message":"错误信息"}
 - `GET /api/agent/summarize/tasks`：列出当前用户任务。
 - `POST /api/agent/summarize/cancel/{task_id}`：取消任务。
 - `POST /api/agent/summarize/retry/{task_id}`：重试失败或取消的任务。
-- `POST /api/agent/summarize/missing`：为缺少摘要的支持文件批量排队，保留作管理 API，页面不再提供手动入口。
+- `POST /api/agent/summarize/missing`：为缺少摘要的支持文件批量排队；页面登录后会自动调用一次。
 
-Web UI 在文件上传、恢复、重命名和移动成功后，会静默调用 `summarize/start`。任务在后台完成 Markdown 转换、摘要、标签和向量索引，不阻塞文件操作。
+Web UI 在登录后会自动扫描并补齐缺失摘要；文件上传、恢复、重命名和移动成功后，也会静默调用 `summarize/start`。任务在后台完成 Markdown 转换、摘要、标签和向量索引，不阻塞文件操作。
 
 ### Markdown 与单文件问答
 
@@ -142,10 +142,19 @@ Web UI 在文件上传、恢复、重命名和移动成功后，会静默调用 
 请求体：
 
 ```json
-{"query":"检索问题","top_k":6}
+{"query":"检索问题","top_k":6,"file_hash":"可选文件 hash","directory":"可选目录"}
 ```
 
-返回相似片段、文件名、hash、块序号、相似度和基于片段生成的回答。
+返回召回片段、文件名、hash、块序号、综合分数、召回来源和基于片段生成的回答。检索层会融合向量语义召回与本地 SQLite 关键词召回；关键词召回优先使用 FTS5，运行环境不支持 FTS5 时自动退回 `LIKE` 匹配。关键词索引用 `dirty` 状态驱动刷新：摘要索引和显式重建会刷新关键词库，临时补索引会标脏，查询只在索引缺失或标脏时补建。
+
+`GET /api/agent/index/status` 返回当前用户索引 manifest 汇总，包括已记录文件数、状态计数、每个文件的 chunk 数、模型名、更新时间，以及关键词索引的 `dirty`、`indexed_chunks` 和 FTS 可用状态。
+
+索引维护接口：
+
+- `GET /api/agent/index/missing`：扫描当前用户文件，返回支持索引但缺少有效 chunk 的文件。
+- `POST /api/agent/index/rebuild/start`：后台重建索引，请求体为 `{"hash":"可选文件 hash","force":false,"include_keyword":true}`；不传 `hash` 时扫描全部支持文件。
+- `GET /api/agent/index/rebuild/status/{task_id}`：查询索引重建任务。
+- `GET /api/agent/index/rebuild/tasks`：列出当前用户最近索引任务。
 
 ## 6. 文档处理与缓存
 
@@ -153,7 +162,7 @@ Web UI 在文件上传、恢复、重命名和移动成功后，会静默调用 
 - 图片使用尺寸、EXIF、嵌入元数据和 SVG 文本生成 fallback Markdown；
 - 音视频在无法提取转录时使用媒体元数据；
 - Markdown 按文件 hash 缓存在 `var/cache/markdown`；
-- RAG 块、embedding 和 FAISS 索引缓存在 `var/cache/vector`；
+- RAG 块、embedding、FAISS 索引、关键词 SQLite 索引和索引 manifest 缓存在 `var/cache/vector`；
 - 摘要成功后会同时写回 Core 摘要与标签，并更新该用户向量索引；
 - 查询前会对照 Core 当前文件列表，移除已删除文件的块并同步重命名后的文件名。
 
@@ -179,4 +188,4 @@ Web UI 在文件上传、恢复、重命名和移动成功后，会静默调用 
 - 兼容启动入口：`scripts/agent_service.py`
 - Python 依赖：`scripts/requirements-agent.txt`
 - Web 调用与流式渲染：`web/index.html`
-- Core/Agent 边界：`docs/agent-decoupling.md`
+- Core/Agent 边界：`docs/architecture.md`

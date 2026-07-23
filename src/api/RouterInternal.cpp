@@ -1,6 +1,7 @@
 #include "RouterInternal.h"
 #include "smartnas/utils/HashUtil.h"
 #include "smartnas/config/AppConfig.h"
+#include "workflow/HttpMessage.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -136,15 +137,38 @@ namespace smartnas::api::detail
 
     std::string get_query_value(const std::string &uri, const std::string &key)
     {
-        std::string marker = key + "=";
-        size_t pos = uri.find(marker);
-        if (pos == std::string::npos)
+        const size_t query_start = uri.find('?');
+        if (query_start == std::string::npos)
             return "";
-        std::string value = uri.substr(pos + marker.size());
-        size_t amp = value.find("&");
-        if (amp != std::string::npos)
-            value = value.substr(0, amp);
-        return smartnas::utils::HashUtil::url_decode(value);
+        size_t begin = query_start + 1;
+        while (begin < uri.size())
+        {
+            const size_t end = uri.find('&', begin);
+            const std::string pair = uri.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+            const size_t equals = pair.find('=');
+            const std::string current_key = pair.substr(0, equals);
+            if (current_key == key)
+            {
+                const std::string value = equals == std::string::npos ? "" : pair.substr(equals + 1);
+                return smartnas::utils::HashUtil::url_decode(value);
+            }
+            if (end == std::string::npos)
+                break;
+            begin = end + 1;
+        }
+        return "";
+    }
+
+    void send_json(protocol::HttpResponse *response, const std::string &body, const std::string &status)
+    {
+        response->set_status_code(status);
+        response->add_header_pair("Content-Type", "application/json; charset=utf-8");
+        response->append_output_body(body);
+    }
+
+    void send_json_error(protocol::HttpResponse *response, const std::string &message, const std::string &status)
+    {
+        send_json(response, "{\"error\":\"" + escape_json_string(message) + "\"}", status);
     }
 
     std::string normalize_dir(std::string dir)

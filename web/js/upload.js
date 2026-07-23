@@ -36,7 +36,7 @@
                         headers: {
                             'Authorization': `Bearer ${token}`, 'File-Name': originalName,
                             'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size,
-                            'Directory': encodeURIComponent(currentDir)
+                            'Directory': encodeURIComponent(window.SmartNASState.currentDirectory)
                         }
                     });
                     await readUploadResponse(instantMergeRes, "创建秒传记录");
@@ -84,7 +84,7 @@
                     headers: {
                         'Authorization': `Bearer ${token}`, 'File-Name': originalName,
                         'File-Hash': fileHash, 'Total-Chunks': totalChunks, 'File-Size': file.size,
-                        'Directory': encodeURIComponent(currentDir)
+                        'Directory': encodeURIComponent(window.SmartNASState.currentDirectory)
                     }
                 });
                 const mergeData = await readUploadResponse(mergeRes, "合并文件");

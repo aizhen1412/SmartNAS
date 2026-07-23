@@ -11,8 +11,8 @@
                 if (!response.ok) throw new Error("服务器拒绝访问");
 
                 const payload = await response.json();
-                globalFiles = Array.isArray(payload) ? payload : (payload.files || []);
-                globalFolders = Array.isArray(payload) ? [] : (payload.folders || []);
+                window.SmartNASState.files = Array.isArray(payload) ? payload : (payload.files || []);
+                window.SmartNASState.folders = Array.isArray(payload) ? [] : (payload.folders || []);
                 updateStats();
                 renderBreadcrumb();
                 applyFilterAndSort();
@@ -54,7 +54,7 @@
         function applyFilterAndSort() {
             const query = (document.getElementById('searchInput').value || '').toLowerCase().trim();
 
-            let filtered = globalFiles.filter(f => {
+            let filtered = window.SmartNASState.files.filter(f => {
                 const summary = (f.summary || '').toLowerCase();
                 const tags = Array.isArray(f.tags) ? f.tags.join(' ').toLowerCase() : '';
                 return f.name.toLowerCase().includes(query) || summary.includes(query) || tags.includes(query);
@@ -77,19 +77,19 @@
 
         function updateStats() {
             const activeTasks = Object.values(summaryTasksByHash).filter(t => ['pending', 'running', 'cancel_requested'].includes(t.status)).length;
-            const summarized = globalFiles.filter(f => (f.summary || '').trim()).length;
+            const summarized = window.SmartNASState.files.filter(f => (f.summary || '').trim()).length;
             const statFiles = document.getElementById('statFiles');
             const statSummaries = document.getElementById('statSummaries');
             const statTasks = document.getElementById('statTasks');
-            if (statFiles) statFiles.innerText = globalFiles.length;
+            if (statFiles) statFiles.innerText = window.SmartNASState.files.length;
             if (statSummaries) statSummaries.innerText = summarized;
             if (statTasks) statTasks.innerText = activeTasks;
         }
 
         function listUrl() {
             const params = new URLSearchParams();
-            params.set('dir', currentDir);
-            if (showingTrash) params.set('deleted', '1');
+            params.set('dir', window.SmartNASState.currentDirectory);
+            if (window.SmartNASState.showingTrash) params.set('deleted', '1');
             return `${API_BASE}/api/list?${params.toString()}`;
         }
 
@@ -98,15 +98,15 @@
             const filesViewBtn = document.getElementById('filesViewBtn');
             const trashViewBtn = document.getElementById('trashViewBtn');
             if (!el) return;
-            if (filesViewBtn) filesViewBtn.classList.toggle('active', !showingTrash);
-            if (trashViewBtn) trashViewBtn.classList.toggle('active', showingTrash);
+            if (filesViewBtn) filesViewBtn.classList.toggle('active', !window.SmartNASState.showingTrash);
+            if (trashViewBtn) trashViewBtn.classList.toggle('active', window.SmartNASState.showingTrash);
 
-            if (showingTrash) {
+            if (window.SmartNASState.showingTrash) {
                 el.innerHTML = '<span class="font-semibold text-red-500"><i class="fas fa-trash-can mr-2"></i>回收站</span>';
                 return;
             }
 
-            const parts = currentDir === '/' ? [] : currentDir.split('/').filter(Boolean);
+            const parts = window.SmartNASState.currentDirectory === '/' ? [] : window.SmartNASState.currentDirectory.split('/').filter(Boolean);
             let path = '';
             const crumbs = [`<button onclick="openDirectory('/')" class="hover:text-blue-600 font-semibold">根目录</button>`];
             parts.forEach(part => {
@@ -117,18 +117,18 @@
         }
 
         function openDirectory(path) {
-            currentDir = path || '/';
-            showingTrash = false;
+            window.SmartNASState.currentDirectory = path || '/';
+            window.SmartNASState.showingTrash = false;
             fetchFileList();
         }
 
         function toggleTrash() {
-            showingTrash = !showingTrash;
+            window.SmartNASState.showingTrash = !window.SmartNASState.showingTrash;
             fetchFileList();
         }
 
         function setTrashView(value) {
-            showingTrash = value;
+            window.SmartNASState.showingTrash = value;
             fetchFileList();
         }
 
@@ -240,7 +240,7 @@
                 taskAction = `<button onclick="retrySummaryTask('${task.id}'); closeActionMenu();"><i class="fas fa-rotate-right"></i>重试任务</button>`;
             }
 
-            if (showingTrash) {
+            if (window.SmartNASState.showingTrash) {
                 menu.innerHTML = `
                     <button onclick="restoreByHash('${hash}'); closeActionMenu();"><i class="fas fa-rotate-left"></i>恢复</button>
                     <button class="danger" onclick="purgeByHash('${hash}'); closeActionMenu();"><i class="fas fa-fire"></i>永久删除</button>
@@ -249,7 +249,6 @@
                 menu.innerHTML = `
                     ${taskAction}
                     <button onclick="askFileByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-circle-question"></i>问这个文件</button>
-                    <button onclick="showMarkdownByHash('${hash}'); closeActionMenu();" style="${disabledClass}"><i class="fas fa-file-code"></i>提取文本</button>
                     <button onclick="renameByHash('${hash}', '${encodeURIComponent(name)}'); closeActionMenu();"><i class="fas fa-pen"></i>重命名</button>
                     <button onclick="moveByHash('${hash}'); closeActionMenu();"><i class="fas fa-folder-tree"></i>移动</button>
                     <button onclick="shareByHash('${hash}'); closeActionMenu();"><i class="fas fa-link"></i>分享</button>
@@ -286,12 +285,12 @@
 
         function renderFiles(files) {
             const listDiv = document.getElementById('file-list');
-            if (files.length === 0 && globalFolders.length === 0) {
+            if (files.length === 0 && window.SmartNASState.folders.length === 0) {
                 listDiv.innerHTML = '<div class="p-8 text-center text-gray-400">暂无文件</div>';
                 return;
             }
 
-            const folderHtml = showingTrash ? '' : globalFolders.map(folder => {
+            const folderHtml = window.SmartNASState.showingTrash ? '' : window.SmartNASState.folders.map(folder => {
                 const safeName = escapeHtml(folder.name);
                 const safePath = escapeHtml(folder.path);
                 const encodedPath = encodeURIComponent(folder.path).replace(/'/g, '%27');
@@ -330,7 +329,7 @@
                 const fileType = getFileTypeLabel(file.name);
                 const task = summaryTasksByHash[file.hash];
                 const taskText = task && task.status === 'failed' ? escapeHtml(task.message || '摘要失败') : '';
-                const canSummarize = isSummarizableFile(file.name) && !showingTrash;
+                const canSummarize = isSummarizableFile(file.name) && !window.SmartNASState.showingTrash;
                 return `
                 <div class="grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-4 px-5 py-3 items-center file-item transition">
                     <div class="md:col-span-4 flex items-start space-x-3 overflow-hidden">
@@ -350,7 +349,7 @@
                     <div class="md:col-span-2 text-sm text-gray-500">${file.size}</div>
                     <div class="md:col-span-3 text-sm text-gray-500">${formatUploadTime(file.uploadTime)}</div>
                     <div class="md:col-span-1 flex md:justify-end space-x-1 flex-shrink-0">
-                        ${showingTrash ? `
+                        ${window.SmartNASState.showingTrash ? `
                             <button onclick="restoreByHash('${safeHash}')" class="icon-btn text-emerald-600" title="恢复"><i class="fas fa-rotate-left"></i></button>
                             <button onclick="openFileMenu('${safeHash}', '${encodedName}', ${canSummarize}, event)" class="icon-btn text-slate-600" title="更多"><i class="fas fa-ellipsis"></i></button>
                         ` : `

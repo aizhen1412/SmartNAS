@@ -13,11 +13,7 @@
         const APP_HOST = window.location.hostname || 'localhost';
         const API_BASE = window.location.origin;
         let AGENT_BASE = `${APP_PROTOCOL}//${APP_HOST}:8081`;
-        const runtimeConfig = {
-            uploadChunkSize: 8 * 1024 * 1024,
-            uploadConcurrency: 4,
-            webCryptoLimit: 256 * 1024 * 1024
-        };
+        const runtimeConfig = window.SmartNASState.runtimeConfig;
 
         async function loadRuntimeConfig() {
             try {
@@ -44,10 +40,6 @@
         }
 
         // --- 核心逻辑：UI 更新 ---
-        let globalFiles = [];
-        let globalFolders = [];
-        let currentDir = "/";
-        let showingTrash = false;
         let summaryTasksByHash = {};
         let summaryPollTimer = null;
         let pendingAskFileHash = '';
@@ -73,6 +65,8 @@
                 `;
                 fetchFileList(); // 登录状态下加载文件
                 loadSummaryTasks();
+                ensureMissingSummaries();
+                ensureSearchIndex();
             } else {
                 userInfoDiv.innerHTML = `
                     <button onclick="openModal('loginModal')" class="ghost-btn h-10 px-4 text-sm font-bold">登录</button>

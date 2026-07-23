@@ -89,6 +89,59 @@
             }
         }
 
+        async function ensureMissingSummaries() {
+            const token = getAuthToken();
+            const state = window.SmartNASState;
+            if (!token || state.missingSummaryScanStarted) return;
+            state.missingSummaryScanStarted = true;
+            try {
+                const response = await fetch(`${AGENT_BASE}/api/agent/summarize/missing`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) throw new Error(`AI 服务返回 ${response.status}`);
+                const result = await response.json();
+                const tasks = result.tasks || [];
+                tasks.forEach(task => { summaryTasksByHash[task.hash] = task; });
+                if (tasks.length > 0) {
+                    updateStats();
+                    applyFilterAndSort();
+                    ensureSummaryPolling();
+                    showToast(`正在为 ${tasks.length} 个缺少摘要的文件生成摘要和索引`);
+                }
+            } catch (error) {
+                state.missingSummaryScanStarted = false;
+                console.warn('初始化缺失摘要任务失败:', error);
+            }
+        }
+
+        async function ensureSearchIndex() {
+            const token = getAuthToken();
+            if (!token) return;
+            try {
+                const missingResponse = await fetch(`${AGENT_BASE}/api/agent/index/missing`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!missingResponse.ok) return;
+                const missing = await missingResponse.json();
+                if ((missing.missing_count || 0) === 0) return;
+
+                const rebuildResponse = await fetch(`${AGENT_BASE}/api/agent/index/rebuild/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ force: false, include_keyword: true })
+                });
+                if (!rebuildResponse.ok) return;
+                const task = await rebuildResponse.json();
+                showToast(`正在补齐 ${missing.missing_count} 个文件的检索索引（任务 ${task.id.slice(0, 8)}）`);
+            } catch (error) {
+                console.warn('初始化文件检索索引失败:', error);
+            }
+        }
+
         function ensureSummaryPolling() {
             if (summaryPollTimer) return;
             summaryPollTimer = setInterval(pollSummaryTasks, 1800);
@@ -293,7 +346,7 @@
         }
 
         async function loadMovePathSuggestions(token) {
-            let folderPaths = globalFolders.map(folder => folder.path);
+            let folderPaths = window.SmartNASState.folders.map(folder => folder.path);
             try {
                 const response = await fetch(`${API_BASE}/api/folders`, {
                     headers: { 'Authorization': `Bearer ${token}` }
@@ -303,7 +356,7 @@
                     folderPaths = folders.map(folder => folder.path);
                 }
             } catch (_) {}
-            const paths = ['/', currentDir, ...folderPaths]
+            const paths = ['/', window.SmartNASState.currentDirectory, ...folderPaths]
                 .filter(Boolean)
                 .filter((path, index, values) => values.indexOf(path) === index);
             document.getElementById('movePathSuggestions').innerHTML = paths.map(path => `
@@ -320,7 +373,7 @@
             pendingMoveFileHash = hash;
             pendingMoveFolderPath = '';
             const input = document.getElementById('moveFilePath');
-            input.value = currentDir || '/';
+            input.value = window.SmartNASState.currentDirectory || '/';
             await loadMovePathSuggestions(token);
             openModal('moveFileModal');
             setTimeout(() => input.focus(), 0);
@@ -332,7 +385,7 @@
             pendingMoveFileHash = '';
             pendingMoveFolderPath = decodeURIComponent(encodedPath);
             const input = document.getElementById('moveFilePath');
-            input.value = currentDir || '/';
+            input.value = window.SmartNASState.currentDirectory || '/';
             await loadMovePathSuggestions(token);
             openModal('moveFileModal');
             setTimeout(() => input.focus(), 0);
@@ -423,7 +476,7 @@
             if (!token) return;
             const name = prompt("文件夹名称");
             if (!name) return;
-            const path = currentDir === "/" ? `/${name}` : `${currentDir}/${name}`;
+            const path = window.SmartNASState.currentDirectory === "/" ? `/${name}` : `${window.SmartNASState.currentDirectory}/${name}`;
             const res = await fetch(`${API_BASE}/api/folders?path=${encodeURIComponent(path)}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }

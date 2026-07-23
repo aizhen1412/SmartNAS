@@ -4,6 +4,8 @@ cmake_minimum_required(VERSION 3.10)
 # 2. 声明项目名称和使用的语言 (CXX 代表 C++)
 project(SmartNAS CXX)
 
+include(CTest)
+
 # 3. 设置 C++ 标准为 C++17 (符合你的规划)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,3 +61,12 @@ target_link_libraries(SmartNAS PRIVATE
     Threads::Threads
     ${SQLITE3_LIB}
 )
+
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(
+        NAME core_api_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_core_api.py $<TARGET_FILE:SmartNAS>
+    )
+    set_tests_properties(core_api_integration PROPERTIES TIMEOUT 30)
+endif()

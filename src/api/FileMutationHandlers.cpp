@@ -32,31 +32,25 @@ namespace smartnas
 
             if (username.empty())
             {
-                resp->set_status_code("401");
-                resp->append_output_body("{\"error\":\"User identification required\"}");
+                send_json_error(resp, "User identification required", "401");
                 return;
             }
 
-            std::string uri = req->get_request_uri();
-            size_t pos = uri.find("hash=");
-            if (pos == std::string::npos)
+            std::string hash = get_query_value(req->get_request_uri(), "hash");
+            if (hash.empty())
             {
-                resp->set_status_code("400");
-                resp->append_output_body("{\"error\":\"Missing hash parameter\"}");
+                send_json_error(resp, "Missing hash parameter", "400");
                 return;
             }
-            std::string hash = uri.substr(pos + 5);
 
             auto &db = smartnas::db::DatabaseManager::get_instance();
             if (db.soft_delete_file_metadata(hash, username))
             {
-                resp->set_status_code("200");
-                resp->append_output_body("{\"status\":\"success\"}");
+                send_json(resp, "{\"status\":\"success\"}");
             }
             else
             {
-                resp->set_status_code("404");
-                resp->append_output_body("{\"error\":\"File not found or no permission\"}");
+                send_json_error(resp, "File not found or no permission", "404");
             }
         }
 
@@ -67,21 +61,20 @@ namespace smartnas
             std::string username = get_authenticated_user(req);
             if (username.empty())
             {
-                resp->set_status_code("401");
+                send_json_error(resp, "User identification required", "401");
                 return;
             }
             std::string hash = get_query_value(req->get_request_uri(), "hash");
             if (hash.empty())
             {
-                resp->set_status_code("400");
+                send_json_error(resp, "Missing hash parameter", "400");
                 return;
             }
             if (db::DatabaseManager::get_instance().restore_file_metadata(hash, username))
-                resp->append_output_body("{\"status\":\"success\"}");
+                send_json(resp, "{\"status\":\"success\"}");
             else
             {
-                resp->set_status_code("404");
-                resp->append_output_body("{\"error\":\"File not found\"}");
+                send_json_error(resp, "File not found", "404");
             }
         }
 
@@ -92,13 +85,13 @@ namespace smartnas
             std::string username = get_authenticated_user(req);
             if (username.empty())
             {
-                resp->set_status_code("401");
+                send_json_error(resp, "User identification required", "401");
                 return;
             }
             std::string hash = get_query_value(req->get_request_uri(), "hash");
             if (hash.empty())
             {
-                resp->set_status_code("400");
+                send_json_error(resp, "Missing hash parameter", "400");
                 return;
             }
             auto &db = db::DatabaseManager::get_instance();
@@ -106,12 +99,11 @@ namespace smartnas
             {
                 if (db.count_file_references(hash) == 0)
                     core::FileManager::delete_file(hash + ".bin");
-                resp->append_output_body("{\"status\":\"success\"}");
+                send_json(resp, "{\"status\":\"success\"}");
             }
             else
             {
-                resp->set_status_code("404");
-                resp->append_output_body("{\"error\":\"File not found\"}");
+                send_json_error(resp, "File not found", "404");
             }
         }
 
@@ -122,23 +114,21 @@ namespace smartnas
             std::string username = get_authenticated_user(req);
             if (username.empty())
             {
-                resp->set_status_code("401");
+                send_json_error(resp, "User identification required", "401");
                 return;
             }
             std::string hash = get_query_value(req->get_request_uri(), "hash");
             std::string name = get_query_value(req->get_request_uri(), "name");
             if (hash.empty() || name.empty() || name.find("/") != std::string::npos)
             {
-                resp->set_status_code("400");
-                resp->append_output_body("{\"error\":\"Invalid hash or name\"}");
+                send_json_error(resp, "Invalid hash or name", "400");
                 return;
             }
             if (db::DatabaseManager::get_instance().rename_file(username, hash, name))
-                resp->append_output_body("{\"status\":\"success\"}");
+                send_json(resp, "{\"status\":\"success\"}");
             else
             {
-                resp->set_status_code("404");
-                resp->append_output_body("{\"error\":\"File not found\"}");
+                send_json_error(resp, "File not found", "404");
             }
         }
 
@@ -149,23 +139,22 @@ namespace smartnas
             std::string username = get_authenticated_user(req);
             if (username.empty())
             {
-                resp->set_status_code("401");
+                send_json_error(resp, "User identification required", "401");
                 return;
             }
             std::string hash = get_query_value(req->get_request_uri(), "hash");
             std::string directory = normalize_dir(get_query_value(req->get_request_uri(), "dir"));
             if (hash.empty())
             {
-                resp->set_status_code("400");
+                send_json_error(resp, "Missing hash parameter", "400");
                 return;
             }
             db::DatabaseManager::get_instance().create_folder(username, directory);
             if (db::DatabaseManager::get_instance().move_file(username, hash, directory))
-                resp->append_output_body("{\"status\":\"success\"}");
+                send_json(resp, "{\"status\":\"success\"}");
             else
             {
-                resp->set_status_code("404");
-                resp->append_output_body("{\"error\":\"File not found\"}");
+                send_json_error(resp, "File not found", "404");
             }
         }
 
@@ -189,4 +178,3 @@ namespace smartnas
 
     } // namespace api
 } // namespace smartnas
-
